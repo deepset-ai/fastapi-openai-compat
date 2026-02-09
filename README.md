@@ -1,5 +1,9 @@
 # fastapi-openai-compat
 
+[![PyPI - Version](https://img.shields.io/pypi/v/fastapi-openai-compat.svg)](https://pypi.org/project/fastapi-openai-compat)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/fastapi-openai-compat.svg)](https://pypi.org/project/fastapi-openai-compat)
+[![Tests](https://github.com/deepset-ai/fastapi-openai-compat/actions/workflows/tests.yml/badge.svg)](https://github.com/deepset-ai/fastapi-openai-compat/actions/workflows/tests.yml)
+
 FastAPI router factory for OpenAI-compatible chat completion endpoints.
 
 Provides a configurable `APIRouter` that exposes `/v1/chat/completions` and `/v1/models` endpoints,
