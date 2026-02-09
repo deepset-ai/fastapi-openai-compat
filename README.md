@@ -4,9 +4,10 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/fastapi-openai-compat.svg)](https://pypi.org/project/fastapi-openai-compat)
 [![Tests](https://github.com/deepset-ai/fastapi-openai-compat/actions/workflows/tests.yml/badge.svg)](https://github.com/deepset-ai/fastapi-openai-compat/actions/workflows/tests.yml)
 
-FastAPI router factory for OpenAI-compatible chat completion endpoints.
+FastAPI router factory for OpenAI-compatible [Chat Completions](https://platform.openai.com/docs/api-reference/chat) endpoints.
 
 Provides a configurable `APIRouter` that exposes `/v1/chat/completions` and `/v1/models` endpoints,
+following the [OpenAI API specification](https://platform.openai.com/docs/api-reference/chat),
 with support for streaming (SSE), non-streaming responses, tool calling, configurable hooks, and custom chunk mapping.
 
 ## Installation
@@ -23,8 +24,9 @@ pip install fastapi-openai-compat[haystack]
 
 ## Quick start
 
-Both sync and async callables are supported. Sync callables are automatically
-executed in a thread pool so they never block the async event loop.
+Create an OpenAI-compatible Chat Completions server in a few lines. Both sync and async
+callables are supported -- sync callables are automatically executed in a thread pool
+so they never block the async event loop.
 
 ```python
 from fastapi import FastAPI
@@ -238,3 +240,7 @@ The [`examples/`](examples/) folder contains ready-to-run servers:
 - **[`haystack_chat.py`](examples/haystack_chat.py)** -- Haystack `OpenAIChatGenerator` with streaming support.
 
 See the [examples README](examples/README.md) for setup and usage instructions.
+
+## Reference
+
+This library implements endpoints compatible with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat).
