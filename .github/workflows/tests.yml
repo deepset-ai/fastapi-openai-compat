@@ -22,6 +22,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+          # uv.lock is not committed (this is a library, not an application)
+          cache-dependency-glob: "**/pyproject.toml"
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
@@ -37,6 +39,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+          # uv.lock is not committed (this is a library, not an application)
+          cache-dependency-glob: "**/pyproject.toml"
 
       - name: Set up Python
         run: uv python install 3.10
