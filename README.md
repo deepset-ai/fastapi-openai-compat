@@ -229,3 +229,12 @@ This works with any object -- dataclasses, dicts, Pydantic models, etc.:
 def dict_mapper(chunk: dict) -> str:
     return chunk["payload"]
 ```
+
+## Examples
+
+The [`examples/`](examples/) folder contains ready-to-run servers:
+
+- **[`basic.py`](examples/basic.py)** -- Minimal echo server, no external API keys required.
+- **[`haystack_chat.py`](examples/haystack_chat.py)** -- Haystack `OpenAIChatGenerator` with streaming support.
+
+See the [examples README](examples/README.md) for setup and usage instructions.
