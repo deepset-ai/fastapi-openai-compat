@@ -1,0 +1,148 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fastapi-openai-compat"
+version = "0.1.0"
+description = "FastAPI router factory for OpenAI-compatible Chat Completion endpoints"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+keywords = ["haystack", "openai", "fastapi", "chat-completion", "streaming"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+]
+dependencies = [
+  "fastapi",
+  "pydantic",
+]
+
+[project.optional-dependencies]
+haystack = ["haystack-ai"]
+
+[project.urls]
+Source = "https://github.com/deepset-ai/fastapi-openai-compat"
+Issues = "https://github.com/deepset-ai/fastapi-openai-compat/issues"
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "ty",
+  "pytest",
+  "pytest-asyncio",
+  "pytest-cov",
+  "httpx",
+  "openai",
+  "haystack-ai",
+]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.rules]
+unused-ignore-comment = "warn"
+
+[tool.ty.src]
+exclude = ["tests/**/*"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+isort.split-on-trailing-comma = false
+flake8-tidy-imports.ban-relative-imports = "all"
+select = [
+  "A",
+  "ARG",
+  "B",
+  "C",
+  "DTZ",
+  "E",
+  "EM",
+  "F",
+  "FBT",
+  "I",
+  "ICN",
+  "ISC",
+  "N",
+  "PLC",
+  "PLE",
+  "PLR",
+  "PLW",
+  "Q",
+  "RUF",
+  "S",
+  "T",
+  "TID",
+  "UP",
+  "W",
+  "YTT",
+  "ASYNC",
+  "C4",
+  "C90",
+  "EXE",
+  "F",
+  "INT",
+  "PERF",
+  "PL",
+  "Q",
+  "SIM",
+  "SLOT",
+  "T10",
+  "W",
+  "YTT",
+  "D209",
+  "D205",
+  "D213",
+  "D419",
+]
+ignore = [
+  "FBT001",
+  "FBT002",
+  "N806",
+  "PERF203",
+  "PLC0415",
+  "S101",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = [
+  "B017",
+  "ARG001",
+  "ARG002",
+  "D102",
+  "D103",
+  "D205",
+  "FBT003",
+  "PLR2004",
+  "S101",
+]
+
+[tool.coverage.run]
+source_pkgs = ["fastapi_openai_compat"]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers"
+asyncio_mode = "auto"
+log_cli = true
+markers = [
+  "unit: unit tests",
+  "integration: integration tests",
+  "asyncio: mark a test as an asyncio coroutine",
+]
