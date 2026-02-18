@@ -57,6 +57,148 @@ async def run_completion(model: str, messages: list[dict], body: dict) -> Comple
     return "Hello from Haystack!"
 ```
 
+## The `run_completion` callable
+
+The `run_completion` callable receives three arguments:
+
+| Argument   | Type         | Description |
+|------------|--------------|-------------|
+| `model`    | `str`        | The model name from the request (e.g. `"my-pipeline"`). |
+| `messages` | `list[dict]` | The conversation history in OpenAI format. |
+| `body`     | `dict`       | The full request body, including all extra parameters (e.g. `temperature`, `max_tokens`, `stream`, `metadata`, `tools`). |
+
+The request model accepts any additional fields beyond `model`, `messages`, and `stream`.
+These extra parameters are forwarded as-is in the `body` dict, so you can use them
+however you need without any library changes.
+
+For example, you can access `metadata` and any other extra field from `body`:
+
+```python
+import time
+from fastapi_openai_compat import ChatCompletion, Choice, Message, CompletionResult
+
+def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+    metadata = body.get("metadata", {})
+    temperature = body.get("temperature", 1.0)
+    request_id = metadata.get("request_id", "unknown")
+
+    return ChatCompletion(
+        id=f"resp-{request_id}",
+        object="chat.completion",
+        created=int(time.time()),
+        model=model,
+        choices=[
+            Choice(
+                index=0,
+                message=Message(role="assistant", content="Hello!"),
+                finish_reason="stop",
+            )
+        ],
+        metadata={"request_id": request_id, "temperature_used": temperature},
+    )
+```
+
+A client can then send:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "my-pipeline",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "temperature": 0.7,
+    "metadata": {"request_id": "abc-123", "user_tier": "premium"}
+  }'
+```
+
+The `metadata` field in the response works because `ChatCompletion` also allows extra fields,
+so you can attach any additional data to the response object.
+
+The return type determines how the response is formatted:
+
+| Return type        | Behavior |
+|--------------------|----------|
+| `str`              | Wrapped automatically into a `ChatCompletion` response. |
+| `Generator`        | Each yielded chunk is converted to a `chat.completion.chunk` SSE message. |
+| `AsyncGenerator`   | Same as `Generator`, but async. |
+| `ChatCompletion`   | Returned as-is for full control over the response. |
+
+## Response types
+
+### Returning a string
+
+The simplest option -- return a plain string and the library wraps it as a
+complete `ChatCompletion` response automatically:
+
+```python
+def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+    last_msg = messages[-1]["content"]
+    return f"You said: {last_msg}"
+```
+
+### Streaming with a generator
+
+Return a generator to stream responses token by token via SSE.
+Each yielded string is automatically wrapped into a `chat.completion.chunk` message --
+you only need to yield the text content, the library handles the SSE wire format.
+A `finish_reason="stop"` sentinel is appended automatically at the end of the stream.
+
+Your `run_completion` should check `body.get("stream", False)` to decide whether
+to return a generator or a plain string:
+
+```python
+from collections.abc import Generator
+
+def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+    last_msg = messages[-1]["content"]
+
+    if body.get("stream", False):
+        def stream() -> Generator[str, None, None]:
+            for word in last_msg.split():
+                yield word + " "
+        return stream()
+
+    return f"You said: {last_msg}"
+```
+
+Async generators work the same way:
+
+```python
+from collections.abc import AsyncGenerator
+
+async def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+    async def stream() -> AsyncGenerator[str, None]:
+        for word in ["Hello", " from", " Haystack", "!"]:
+            yield word
+    return stream()
+```
+
+### Returning a ChatCompletion
+
+For full control over the response (e.g. custom `usage`, `finish_reason`, or `system_fingerprint`),
+return a `ChatCompletion` object directly:
+
+```python
+import time
+from fastapi_openai_compat import ChatCompletion, Choice, Message, CompletionResult
+
+def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+    return ChatCompletion(
+        id="resp-1",
+        object="chat.completion",
+        created=int(time.time()),
+        model=model,
+        choices=[
+            Choice(
+                index=0,
+                message=Message(role="assistant", content="Hello!"),
+                finish_reason="stop",
+            )
+        ],
+        usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    )
+```
+
 ## Tool calling
 
 ### Returning ChatCompletion directly
@@ -241,6 +383,42 @@ The [`examples/`](examples/) folder contains ready-to-run servers:
 
 See the [examples README](examples/README.md) for setup and usage instructions.
 
-## Reference
+## API reference
 
 This library implements endpoints compatible with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat).
+
+### `create_openai_router`
+
+```python
+create_openai_router(
+    *,
+    list_models,
+    run_completion,
+    pre_hook=None,
+    post_hook=None,
+    chunk_mapper=default_chunk_mapper,
+    owned_by="custom",
+    tags=None,
+) -> APIRouter
+```
+
+| Parameter        | Type                      | Description |
+|------------------|---------------------------|-------------|
+| `list_models`    | `Callable -> list[str]`   | Returns available model/pipeline names. |
+| `run_completion` | `Callable -> CompletionResult` | Runs a chat completion given `(model, messages, body)`. |
+| `pre_hook`       | `Callable` or `None`      | Called before `run_completion`. Receives `ChatRequest`, returns modified request (transformer) or `None` (observer). |
+| `post_hook`      | `Callable` or `None`      | Called after `run_completion`. Receives `CompletionResult`, returns modified result (transformer) or `None` (observer). |
+| `chunk_mapper`   | `Callable[[Any], str]`    | Converts streamed chunks to strings. Default handles `str` and `.content` attribute. |
+| `owned_by`       | `str`                     | Value for the `owned_by` field in model objects. Defaults to `"custom"`. |
+| `tags`           | `list[str]` or `None`     | OpenAPI tags for the generated endpoints. Defaults to `["openai"]`. |
+
+### Endpoints
+
+The router exposes the following endpoints (with and without the `/v1` prefix):
+
+| Method | Path                        | Description |
+|--------|-----------------------------|-------------|
+| `GET`  | `/v1/models`                | List available models. |
+| `POST` | `/v1/chat/completions`      | Create a chat completion (streaming or non-streaming). |
+| `GET`  | `/models`                   | Alias for `/v1/models`. |
+| `POST` | `/chat/completions`         | Alias for `/v1/chat/completions`. |

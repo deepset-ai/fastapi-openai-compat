@@ -2,7 +2,7 @@
 
 ## Basic example
 
-A minimal server with two models (`echo` and `echo-stream`) that requires no external API keys.
+A minimal server with three models (`echo`, `echo-stream`, and `echo-metadata`) that requires no external API keys.
 
 ```bash
 pip install fastapi-openai-compat "fastapi[standard]"
@@ -27,6 +27,11 @@ curl http://localhost:8000/v1/chat/completions \
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "echo-stream", "messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
+
+# Metadata in request and response
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "echo-metadata", "messages": [{"role": "user", "content": "Hello!"}], "metadata": {"request_id": "abc-123"}}'
 ```
 
 ## Haystack chat example

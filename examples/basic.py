@@ -22,7 +22,12 @@ Test:
     # Streaming completion
     curl http://localhost:8000/v1/chat/completions \
       -H "Content-Type: application/json" \
-      -d '{"model": "echo", "messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
+      -d '{"model": "echo-stream", "messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
+
+    # Metadata in request and response
+    curl http://localhost:8000/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -d '{"model": "echo-metadata", "messages": [{"role": "user", "content": "Hello!"}], "metadata": {"request_id": "abc-123"}}'
 
     # Works with the OpenAI Python client too:
     #   pip install openai
@@ -34,17 +39,18 @@ Test:
     #   "
 """
 
+import time
 import uvicorn
 from collections.abc import Generator
 
 from fastapi import FastAPI
 
-from fastapi_openai_compat import CompletionResult, create_openai_router
+from fastapi_openai_compat import ChatCompletion, Choice, CompletionResult, Message, create_openai_router
 
 
 def list_models() -> list[str]:
     """Return the list of available models."""
-    return ["echo", "echo-stream"]
+    return ["echo", "echo-stream", "echo-metadata"]
 
 
 def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
@@ -53,11 +59,15 @@ def run_completion(model: str, messages: list[dict], body: dict) -> CompletionRe
 
     - "echo" model: returns the last user message as a plain string.
     - "echo-stream" model: streams the last user message word by word.
+    - "echo-metadata" model: reads metadata from the request and includes it in the response.
     """
     last_message = messages[-1]["content"] if messages else "No messages provided."
 
     if model == "echo-stream":
         return _stream_words(last_message)
+
+    if model == "echo-metadata":
+        return _echo_with_metadata(model, last_message, body)
 
     return f"You said: {last_message}"
 
@@ -68,6 +78,27 @@ def _stream_words(text: str) -> Generator[str, None, None]:
     for i, word in enumerate(words):
         suffix = "" if i == len(words) - 1 else " "
         yield word + suffix
+
+
+def _echo_with_metadata(model: str, last_message: str, body: dict) -> ChatCompletion:
+    """Return a ChatCompletion with request metadata echoed back in the response."""
+    metadata = body.get("metadata", {})
+    request_id = metadata.get("request_id", "unknown")
+
+    return ChatCompletion(
+        id=f"resp-{request_id}",
+        object="chat.completion",
+        created=int(time.time()),
+        model=model,
+        choices=[
+            Choice(
+                index=0,
+                message=Message(role="assistant", content=f"You said: {last_message}"),
+                finish_reason="stop",
+            )
+        ],
+        metadata={"request_id": request_id, "echo": True},
+    )
 
 
 app = FastAPI(title="Basic OpenAI-Compatible Server")
