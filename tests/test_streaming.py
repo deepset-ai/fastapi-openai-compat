@@ -7,6 +7,7 @@ from haystack.dataclasses import StreamingChunk
 from haystack.dataclasses.streaming_chunk import ToolCallDelta
 
 from fastapi_openai_compat.streaming import (
+    _is_custom_event,
     chat_completion_response,
     create_async_streaming_response,
     create_sse_data_msg,
@@ -291,3 +292,135 @@ class TestDuckTypingToolCalls:
 
         first = json.loads(chunks[0][len("data: ") :])
         assert first["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "alt_tool"
+
+
+class FakeEvent:
+    def __init__(self, description: str, done: bool = False):
+        self.description = description
+        self.done = done
+
+    def to_event_dict(self) -> dict:
+        return {"type": "status", "data": {"description": self.description, "done": self.done}}
+
+
+@pytest.mark.unit
+class TestIsCustomEvent:
+    def test_recognizes_object_with_to_event_dict(self):
+        assert _is_custom_event(FakeEvent("hi")) is True
+
+    def test_rejects_plain_string(self):
+        assert _is_custom_event("hello") is False
+
+    def test_rejects_none(self):
+        assert _is_custom_event(None) is False
+
+    def test_rejects_non_callable_attribute(self):
+        @dataclass
+        class BadEvent:
+            to_event_dict: str = "not callable"
+
+        assert _is_custom_event(BadEvent()) is False
+
+
+@pytest.mark.unit
+class TestCustomEventSyncStreaming:
+    @pytest.mark.asyncio
+    async def test_custom_events_interspersed_with_text(self):
+        def gen() -> Generator[str | FakeEvent, None, None]:
+            yield FakeEvent("Processing...")
+            yield "Hello "
+            yield "world"
+            yield FakeEvent("Done", done=True)
+
+        response = create_sync_streaming_response(gen(), resp_id="r-evt", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        assert len(chunks) == 5
+
+        evt1 = json.loads(chunks[0][len("data: ") :])
+        assert evt1["event"]["type"] == "status"
+        assert evt1["event"]["data"]["description"] == "Processing..."
+        assert evt1["event"]["data"]["done"] is False
+
+        text1 = json.loads(chunks[1][len("data: ") :])
+        assert text1["choices"][0]["delta"]["content"] == "Hello "
+
+        text2 = json.loads(chunks[2][len("data: ") :])
+        assert text2["choices"][0]["delta"]["content"] == "world"
+
+        evt2 = json.loads(chunks[3][len("data: ") :])
+        assert evt2["event"]["type"] == "status"
+        assert evt2["event"]["data"]["done"] is True
+
+        stop = json.loads(chunks[4][len("data: ") :])
+        assert stop["choices"][0]["finish_reason"] == "stop"
+
+    @pytest.mark.asyncio
+    async def test_only_custom_events_no_auto_stop(self):
+        """When only custom events are yielded, no finish_reason="stop" is appended."""
+
+        def gen() -> Generator[FakeEvent, None, None]:
+            yield FakeEvent("start")
+            yield FakeEvent("end", done=True)
+
+        response = create_sync_streaming_response(gen(), resp_id="r-only-evt", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        assert len(chunks) == 2
+        for chunk in chunks:
+            payload = json.loads(chunk[len("data: ") :])
+            assert "event" in payload
+
+    @pytest.mark.asyncio
+    async def test_custom_events_do_not_affect_explicit_finish(self):
+        def gen() -> Generator[str | FakeEvent, None, None]:
+            yield FakeEvent("Working...")
+            yield StreamingChunk(content="done")
+            yield StreamingChunk(content="", finish_reason="length")
+            yield FakeEvent("Finished", done=True)
+
+        response = create_sync_streaming_response(gen(), resp_id="r-evt-fr", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        assert len(chunks) == 4
+
+        last_completion = json.loads(chunks[2][len("data: ") :])
+        assert last_completion["choices"][0]["finish_reason"] == "length"
+
+
+@pytest.mark.unit
+class TestCustomEventAsyncStreaming:
+    @pytest.mark.asyncio
+    async def test_custom_events_interspersed_with_text(self):
+        async def gen() -> AsyncGenerator[str | FakeEvent, None]:
+            yield FakeEvent("Processing...")
+            yield "Hello "
+            yield "world"
+            yield FakeEvent("Done", done=True)
+
+        response = create_async_streaming_response(gen(), resp_id="r-evt-async", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        assert len(chunks) == 5
+
+        evt1 = json.loads(chunks[0][len("data: ") :])
+        assert evt1["event"]["type"] == "status"
+        assert evt1["event"]["data"]["description"] == "Processing..."
+
+        text1 = json.loads(chunks[1][len("data: ") :])
+        assert text1["choices"][0]["delta"]["content"] == "Hello "
+
+        stop = json.loads(chunks[4][len("data: ") :])
+        assert stop["choices"][0]["finish_reason"] == "stop"
+
+    @pytest.mark.asyncio
+    async def test_only_custom_events_async(self):
+        async def gen() -> AsyncGenerator[FakeEvent, None]:
+            yield FakeEvent("start")
+
+        response = create_async_streaming_response(gen(), resp_id="r-only-evt-a", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        assert len(chunks) == 1
+        payload = json.loads(chunks[0][len("data: ") :])
+        assert "event" in payload

@@ -56,6 +56,11 @@ def _completion_to_sse(completion: ChatCompletion) -> str:
     return f"data: {completion.model_dump_json()}\n\n"
 
 
+def _is_custom_event(chunk: Any) -> bool:
+    """Check if a chunk is a custom SSE event via duck typing (.to_event_dict())."""
+    return callable(getattr(chunk, "to_event_dict", None))
+
+
 def _has_tool_calls(chunk: Any) -> bool:
     """Check if a chunk carries tool call deltas (duck typing)."""
     tool_calls = getattr(chunk, "tool_calls", None)
@@ -115,9 +120,11 @@ def create_sync_streaming_response(
     """
     Wrap a synchronous generator of chunks into an SSE StreamingResponse.
 
-    Handles three chunk types automatically:
+    Handles four chunk types automatically:
 
     * ``ChatCompletion`` objects are serialized directly.
+    * Objects with a ``to_event_dict()`` method are serialized as custom SSE
+      events (e.g. Open WebUI status/notification events).
     * Chunks with a ``tool_calls`` attribute (e.g. Haystack ``StreamingChunk``)
       are converted to OpenAI-format tool call deltas.
     * All other chunks are mapped to text via ``chunk_mapper``.
@@ -125,6 +132,7 @@ def create_sync_streaming_response(
     A ``finish_reason`` attribute on any non-``ChatCompletion`` chunk is
     propagated to the SSE message.  A final ``finish_reason="stop"`` sentinel
     is appended only when no chunk already carried a finish reason.
+    Custom events do not affect finish reason tracking.
     """
 
     def stream_chunks() -> Generator[str, None, None]:
@@ -133,6 +141,8 @@ def create_sync_streaming_response(
         for chunk in result:
             if isinstance(chunk, ChatCompletion):
                 yield _completion_to_sse(chunk)
+            elif _is_custom_event(chunk):
+                yield event_to_sse_msg(chunk.to_event_dict())
             elif _has_tool_calls(chunk):
                 yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name)
                 has_non_completion_chunks = True
@@ -164,9 +174,11 @@ def create_async_streaming_response(
     """
     Wrap an asynchronous generator of chunks into an SSE StreamingResponse.
 
-    Handles three chunk types automatically:
+    Handles four chunk types automatically:
 
     * ``ChatCompletion`` objects are serialized directly.
+    * Objects with a ``to_event_dict()`` method are serialized as custom SSE
+      events (e.g. Open WebUI status/notification events).
     * Chunks with a ``tool_calls`` attribute (e.g. Haystack ``StreamingChunk``)
       are converted to OpenAI-format tool call deltas.
     * All other chunks are mapped to text via ``chunk_mapper``.
@@ -174,6 +186,7 @@ def create_async_streaming_response(
     A ``finish_reason`` attribute on any non-``ChatCompletion`` chunk is
     propagated to the SSE message.  A final ``finish_reason="stop"`` sentinel
     is appended only when no chunk already carried a finish reason.
+    Custom events do not affect finish reason tracking.
     """
 
     async def stream_chunks_async() -> AsyncGenerator[str, None]:
@@ -182,6 +195,8 @@ def create_async_streaming_response(
         async for chunk in result:
             if isinstance(chunk, ChatCompletion):
                 yield _completion_to_sse(chunk)
+            elif _is_custom_event(chunk):
+                yield event_to_sse_msg(chunk.to_event_dict())
             elif _has_tool_calls(chunk):
                 yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name)
                 has_non_completion_chunks = True

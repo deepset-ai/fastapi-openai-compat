@@ -83,7 +83,13 @@ def _stream_completion(
     messages: list[ChatMessage],
     body: dict,
 ) -> Generator[StreamingChunk, None, None]:
-    """Run a streaming chat completion, yielding Haystack StreamingChunks."""
+    """
+    Run a streaming chat completion, yielding Haystack StreamingChunks.
+
+    You can also yield custom event objects (any object with a .to_event_dict()
+    method) interspersed with StreamingChunks to send side-channel SSE events
+    (e.g. Open WebUI status updates). See examples/basic.py for a demo.
+    """
     chunks: list[StreamingChunk] = []
 
     def on_chunk(chunk: StreamingChunk) -> None:

@@ -1,3 +1,4 @@
+import json
 from collections.abc import Generator
 
 import httpx
@@ -9,9 +10,18 @@ from openai import AsyncOpenAI
 from fastapi_openai_compat import CompletionResult, create_openai_router
 
 
+class StatusEvent:
+    def __init__(self, description: str, done: bool = False):
+        self.description = description
+        self.done = done
+
+    def to_event_dict(self) -> dict:
+        return {"type": "status", "data": {"description": self.description, "done": self.done}}
+
+
 def _build_app() -> FastAPI:
     def list_models() -> list[str]:
-        return ["echo-pipeline", "streaming-pipeline"]
+        return ["echo-pipeline", "streaming-pipeline", "event-streaming-pipeline"]
 
     def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
         last = messages[-1]["content"] if messages else ""
@@ -22,6 +32,15 @@ def _build_app() -> FastAPI:
                     yield word + " "
 
             return _gen()
+        if model == "event-streaming-pipeline":
+
+            def _gen_events() -> Generator[str | StatusEvent, None, None]:
+                yield StatusEvent("Working...")
+                for word in last.split():
+                    yield word + " "
+                yield StatusEvent("Done", done=True)
+
+            return _gen_events()
         return f"Echo: {last}"
 
     app = FastAPI()
@@ -38,6 +57,13 @@ async def openai_client():
     client = AsyncOpenAI(api_key="test-key", base_url="http://testserver/v1", http_client=http_client)
     yield client
     await http_client.aclose()
+
+
+@pytest.fixture()
+def raw_http_client():
+    app = _build_app()
+    transport = ASGITransport(app=app)
+    return httpx.AsyncClient(transport=transport, base_url="http://testserver")
 
 
 @pytest.mark.integration
@@ -132,3 +158,61 @@ async def test_openai_streaming_chunk_fields(openai_client):
 
     stop_chunk = chunks[-1]
     assert stop_chunk.choices[0].finish_reason == "stop"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_custom_events_raw_sse(raw_http_client):
+    """Verify custom SSE events are present in the raw HTTP response."""
+    resp = await raw_http_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "event-streaming-pipeline",
+            "messages": [{"role": "user", "content": "hello world"}],
+            "stream": True,
+        },
+    )
+    assert resp.status_code == 200
+
+    lines = resp.text.strip().split("\n")
+    data_lines = [line for line in lines if line.startswith("data: ")]
+    events = [json.loads(dl[len("data: ") :]) for dl in data_lines]
+
+    custom_events = [e for e in events if "event" in e]
+    assert len(custom_events) == 2
+    assert custom_events[0]["event"]["type"] == "status"
+    assert custom_events[0]["event"]["data"]["description"] == "Working..."
+    assert custom_events[1]["event"]["data"]["done"] is True
+
+    completion_chunks = [e for e in events if "choices" in e]
+    contents = [c["choices"][0]["delta"]["content"] for c in completion_chunks if c["choices"][0].get("delta", {}).get("content")]
+    assert contents == ["hello ", "world "]
+
+    last = completion_chunks[-1]
+    assert last["choices"][0]["finish_reason"] == "stop"
+    await raw_http_client.aclose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_openai_streaming_with_custom_events_still_works(openai_client):
+    """The OpenAI SDK gracefully handles streams containing custom events."""
+    stream = await openai_client.chat.completions.create(
+        model="event-streaming-pipeline",
+        messages=[{"role": "user", "content": "foo bar"}],
+        stream=True,
+    )
+
+    contents = []
+    finish_reasons = []
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        if delta.content:
+            contents.append(delta.content)
+        if chunk.choices[0].finish_reason:
+            finish_reasons.append(chunk.choices[0].finish_reason)
+
+    assert contents == ["foo ", "bar "]
+    assert "stop" in finish_reasons

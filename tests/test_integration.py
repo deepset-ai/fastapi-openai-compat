@@ -901,3 +901,106 @@ def test_streaming_chunk_auto_stop_when_no_finish_reason():
 
         last = json.loads(data_lines[-1][len("data: ") :])
         assert last["choices"][0]["finish_reason"] == "stop"
+
+
+@pytest.mark.integration
+def test_custom_events_sync_streaming(client: TestClient):
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "event-streaming-pipeline",
+            "messages": [{"role": "user", "content": "hello world"}],
+            "stream": True,
+        },
+    )
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    lines = resp.text.strip().split("\n")
+    data_lines = [line for line in lines if line.startswith("data: ")]
+
+    events = [json.loads(dl[len("data: ") :]) for dl in data_lines]
+
+    assert events[0]["event"]["type"] == "status"
+    assert events[0]["event"]["data"]["description"] == "Starting..."
+    assert events[0]["event"]["data"]["done"] is False
+
+    assert events[1]["choices"][0]["delta"]["content"] == "hello "
+    assert events[2]["choices"][0]["delta"]["content"] == "world "
+
+    assert events[3]["event"]["type"] == "status"
+    assert events[3]["event"]["data"]["done"] is True
+
+    assert events[4]["choices"][0]["finish_reason"] == "stop"
+
+
+@pytest.mark.integration
+def test_custom_events_async_streaming(client: TestClient):
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "async-event-streaming-pipeline",
+            "messages": [{"role": "user", "content": "foo bar"}],
+            "stream": True,
+        },
+    )
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    lines = resp.text.strip().split("\n")
+    data_lines = [line for line in lines if line.startswith("data: ")]
+
+    events = [json.loads(dl[len("data: ") :]) for dl in data_lines]
+
+    assert events[0]["event"]["type"] == "status"
+    assert events[0]["event"]["data"]["description"] == "Starting..."
+
+    assert events[1]["choices"][0]["delta"]["content"] == "foo "
+    assert events[2]["choices"][0]["delta"]["content"] == "bar "
+
+    assert events[3]["event"]["type"] == "status"
+    assert events[3]["event"]["data"]["done"] is True
+
+    assert events[4]["choices"][0]["finish_reason"] == "stop"
+
+
+@pytest.mark.integration
+def test_custom_events_standalone_app():
+    class MyEvent:
+        def __init__(self, msg: str):
+            self.msg = msg
+
+        def to_event_dict(self) -> dict:
+            return {"type": "notification", "data": {"message": self.msg}}
+
+    def _list() -> list[str]:
+        return ["m"]
+
+    def _run(model: str, messages: list[dict], body: dict) -> CompletionResult:
+        def _gen():
+            yield MyEvent("Starting")
+            yield "content"
+            yield MyEvent("Finished")
+
+        return _gen()
+
+    app = FastAPI()
+    router = create_openai_router(list_models=_list, run_completion=_run)
+    app.include_router(router)
+    with TestClient(app) as tc:
+        resp = tc.post(
+            "/v1/chat/completions",
+            json={"model": "m", "messages": [{"role": "user", "content": "x"}], "stream": True},
+        )
+        assert resp.status_code == 200
+        lines = resp.text.strip().split("\n")
+        data_lines = [line for line in lines if line.startswith("data: ")]
+        events = [json.loads(dl[len("data: ") :]) for dl in data_lines]
+
+        assert len(events) == 4
+        assert events[0]["event"]["type"] == "notification"
+        assert events[0]["event"]["data"]["message"] == "Starting"
+        assert events[1]["choices"][0]["delta"]["content"] == "content"
+        assert events[2]["event"]["type"] == "notification"
+        assert events[2]["event"]["data"]["message"] == "Finished"
+        assert events[3]["choices"][0]["finish_reason"] == "stop"

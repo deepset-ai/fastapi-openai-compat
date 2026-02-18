@@ -8,7 +8,14 @@ from haystack.dataclasses import StreamingChunk
 
 from fastapi_openai_compat import ChatRequest, CompletionResult, create_openai_router
 
-FAKE_MODELS = ["echo-pipeline", "streaming-pipeline", "async-streaming-pipeline", "str-streaming-pipeline"]
+FAKE_MODELS = [
+    "echo-pipeline",
+    "streaming-pipeline",
+    "async-streaming-pipeline",
+    "str-streaming-pipeline",
+    "event-streaming-pipeline",
+    "async-event-streaming-pipeline",
+]
 
 
 def _echo(last_message: str) -> CompletionResult:
@@ -39,11 +46,44 @@ def _str_stream(last_message: str) -> CompletionResult:
     return _gen()
 
 
+class FakeStatusEvent:
+    """Test custom SSE event -- any object with .to_event_dict() is recognized."""
+
+    def __init__(self, description: str, done: bool = False):
+        self.description = description
+        self.done = done
+
+    def to_event_dict(self) -> dict:
+        return {"type": "status", "data": {"description": self.description, "done": self.done}}
+
+
+def _event_stream(last_message: str) -> CompletionResult:
+    def _gen() -> Generator[str | FakeStatusEvent, None, None]:
+        yield FakeStatusEvent("Starting...")
+        for word in last_message.split():
+            yield word + " "
+        yield FakeStatusEvent("Done", done=True)
+
+    return _gen()
+
+
+def _async_event_stream(last_message: str) -> CompletionResult:
+    async def _gen() -> AsyncGenerator[str | FakeStatusEvent, None]:
+        yield FakeStatusEvent("Starting...")
+        for word in last_message.split():
+            yield word + " "
+        yield FakeStatusEvent("Done", done=True)
+
+    return _gen()
+
+
 _HANDLERS: dict[str, Callable[[str], CompletionResult]] = {
     "echo-pipeline": _echo,
     "streaming-pipeline": _sync_stream,
     "async-streaming-pipeline": _async_stream,
     "str-streaming-pipeline": _str_stream,
+    "event-streaming-pipeline": _event_stream,
+    "async-event-streaming-pipeline": _async_event_stream,
 }
 
 

@@ -295,6 +295,40 @@ The library automatically:
 - Only auto-appends `finish_reason="stop"` if no chunk already carried a finish reason
 - Works via duck typing -- any object with `tool_calls` and `finish_reason` attributes is supported
 
+## Custom SSE events
+
+You can yield custom SSE events alongside regular chat completion chunks. This is useful
+for sending side-channel data to clients like [Open WebUI](https://openwebui.com) --
+status updates, notifications, source citations, etc.
+
+Any object with a `.to_event_dict()` method is recognized as a custom event and serialized
+as `data: {"event": {...}}` in the SSE stream. Custom events don't interfere with
+chat completion chunks or the `finish_reason` tracking.
+
+```python
+from collections.abc import Generator
+from fastapi_openai_compat import CompletionResult
+
+class StatusEvent:
+    def __init__(self, description: str, done: bool = False):
+        self.description = description
+        self.done = done
+
+    def to_event_dict(self) -> dict:
+        return {"type": "status", "data": {"description": self.description, "done": self.done}}
+
+def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+    def stream() -> Generator[str | StatusEvent, None, None]:
+        yield StatusEvent("Processing your request...")
+        for word in ["Hello", " from", " Haystack", "!"]:
+            yield word
+        yield StatusEvent("Done", done=True)
+    return stream()
+```
+
+This works via duck typing -- any object implementing `to_event_dict() -> dict` is supported.
+The protocol is compatible with [Hayhooks' Open WebUI events](https://deepset-ai.github.io/hayhooks/).
+
 ## Hooks
 
 You can inject pre/post hooks to modify requests and results (transformer hooks)
