@@ -1,0 +1,164 @@
+"""
+Responses API example with file upload and file_id input flow.
+
+This example keeps files in memory and exposes:
+- POST /v1/files (via create_files_router callback)
+- POST /v1/responses
+
+It demonstrates OpenAI client compatibility for:
+1) file upload via files.create(...)
+2) passing input_file with file_id to responses.create(...)
+
+Run:
+    pip install fastapi-openai-compat "fastapi[standard]" openai
+    fastapi dev examples/responses_with_files.py
+    # or
+    python examples/responses_with_files.py
+
+Curl demo (requires jq):
+    FILE_ID=$(curl -s http://localhost:8000/v1/files \
+      -F "purpose=user_data" \
+      -F "file=@README.md" | jq -r '.id')
+
+    curl http://localhost:8000/v1/responses \
+      -H "Content-Type: application/json" \
+      -d "{
+        \"model\": \"responses-files\",
+        \"input\": [{
+          \"role\": \"user\",
+          \"content\": [
+            {\"type\": \"input_file\", \"file_id\": \"${FILE_ID}\"},
+            {\"type\": \"input_text\", \"text\": \"Summarize this file briefly.\"}
+          ]
+        }]
+      }" | jq
+
+Python client demo:
+    from openai import OpenAI
+    client = OpenAI(base_url="http://localhost:8000/v1", api_key="unused")
+
+    uploaded = client.files.create(
+        file=open("README.md", "rb"),
+        purpose="user_data",
+    )
+
+    response = client.responses.create(
+        model="responses-files",
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_file", "file_id": uploaded.id},
+                    {"type": "input_text", "text": "Summarize this file briefly."},
+                ],
+            }
+        ],
+    )
+    print(response.output[0].content[0].text)
+"""
+
+import time
+from collections.abc import Generator
+
+import uvicorn
+from fastapi import FastAPI
+
+from fastapi_openai_compat import ResponseResult, create_files_router, create_responses_router
+
+MODEL = "responses-files"
+FILES: dict[str, dict] = {}
+
+
+def list_models() -> list[str]:
+    return [MODEL]
+
+
+def run_response(model: str, input_items: list[dict], body: dict) -> ResponseResult:
+    _ = body
+    references: list[str] = []
+    instructions: list[str] = []
+
+    for part in _iter_content_parts(input_items):
+        if part.get("type") == "input_text":
+            text = str(part.get("text", "")).strip()
+            if text:
+                instructions.append(text)
+            continue
+
+        file_ref = _file_reference(part)
+        if file_ref is not None:
+            references.append(file_ref)
+
+    if not references:
+        return "No input_file items found. Send input_file with file_id, file_url, or file_data."
+
+    instruction = instructions[0] if instructions else "No instruction text provided."
+    refs = "; ".join(references)
+    return f"Model {model} received files: {refs}. Instruction: {instruction}"
+
+
+def _iter_content_parts(input_items: list[dict]) -> Generator[dict, None, None]:
+    for item in input_items:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict):
+                yield part
+
+
+def _file_reference(part: dict) -> str | None:
+    if part.get("type") != "input_file":
+        return None
+
+    if "file_id" in part:
+        file_id = str(part["file_id"])
+        meta = FILES.get(file_id)
+        if meta is None:
+            return f"{file_id} (unknown)"
+        return f"{file_id} ({meta['filename']}, {meta['bytes']} bytes)"
+
+    if "file_url" in part:
+        return f"url:{part['file_url']}"
+
+    if "filename" in part and "file_data" in part:
+        return f"inline:{part['filename']}"
+
+    return "input_file:unresolved"
+
+
+app = FastAPI(title="Responses API Files Example")
+
+
+def run_file_upload(filename: str | None, _content_type: str | None, content: bytes, purpose: str) -> dict:
+    file_id = f"file_{len(FILES) + 1}"
+    FILES[file_id] = {
+        "filename": filename or "unknown",
+        "purpose": purpose,
+        "bytes": len(content),
+        "stored_at": int(time.time()),
+    }
+    return {
+        "id": file_id,
+        "object": "file",
+        "bytes": len(content),
+        "created_at": int(time.time()),
+        "filename": filename,
+        "purpose": purpose,
+        "status": "processed",
+    }
+
+
+app.include_router(create_files_router(run_file_upload=run_file_upload))
+app.include_router(
+    create_responses_router(
+        list_models=list_models,
+        run_response=run_response,
+        include_models_endpoints=True,
+    )
+)
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # noqa: S104

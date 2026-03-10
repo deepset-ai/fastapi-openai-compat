@@ -1,5 +1,5 @@
-import asyncio
 import functools
+import inspect
 import logging
 import time
 import traceback
@@ -37,7 +37,7 @@ RunCompletionFn = Callable[..., Any]
 
 def _ensure_async(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a sync callable so it runs in a thread pool; return async callables as-is."""
-    if asyncio.iscoroutinefunction(fn):
+    if inspect.iscoroutinefunction(fn):
         return fn
 
     @functools.wraps(fn)
@@ -57,7 +57,7 @@ async def _default_post_hook(result: CompletionResult) -> CompletionResult:
     return result
 
 
-def create_openai_router(  # noqa: PLR0913, C901
+def create_chat_completion_router(  # noqa: PLR0913, C901
     *,
     list_models: ListModelsFn,
     run_completion: RunCompletionFn,
@@ -220,3 +220,30 @@ def create_openai_router(  # noqa: PLR0913, C901
         raise HTTPException(status_code=500, detail="Unsupported response type from completion")
 
     return router
+
+
+def create_openai_router(  # noqa: PLR0913
+    *,
+    list_models: ListModelsFn,
+    run_completion: RunCompletionFn,
+    pre_hook: PreHook | None = None,
+    post_hook: PostHook | None = None,
+    chunk_mapper: ChunkMapper = default_chunk_mapper,
+    owned_by: str = "custom",
+    tags: list[str] | None = None,
+) -> APIRouter:
+    """
+    Backward-compatible alias for `create_chat_completion_router`.
+
+    Existing integrations can keep using `create_openai_router`; new code should
+    prefer `create_chat_completion_router` for clarity.
+    """
+    return create_chat_completion_router(
+        list_models=list_models,
+        run_completion=run_completion,
+        pre_hook=pre_hook,
+        post_hook=post_hook,
+        chunk_mapper=chunk_mapper,
+        owned_by=owned_by,
+        tags=tags,
+    )

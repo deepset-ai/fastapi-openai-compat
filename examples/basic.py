@@ -12,7 +12,7 @@ Run:
 
 Test:
     # List models
-    curl http://localhost:8000/v1/models | python -m json.tool
+    curl http://localhost:8000/v1/models | jq
 
     # Non-streaming completion
     curl http://localhost:8000/v1/chat/completions \
@@ -50,7 +50,7 @@ from collections.abc import Generator
 
 from fastapi import FastAPI
 
-from fastapi_openai_compat import ChatCompletion, Choice, CompletionResult, Message, create_openai_router
+from fastapi_openai_compat import ChatCompletion, Choice, CompletionResult, Message, create_chat_completion_router
 
 
 class StatusEvent:
@@ -132,7 +132,7 @@ def _stream_with_events(text: str) -> Generator[str | StatusEvent, None, None]:
 
 
 app = FastAPI(title="Basic OpenAI-Compatible Server")
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
 )

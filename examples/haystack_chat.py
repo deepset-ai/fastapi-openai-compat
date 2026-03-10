@@ -46,7 +46,7 @@ from fastapi import FastAPI
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.dataclasses import ChatMessage, StreamingChunk
 
-from fastapi_openai_compat import CompletionResult, create_openai_router
+from fastapi_openai_compat import CompletionResult, create_chat_completion_router
 
 # Available models -- each one will use OpenAI under the hood,
 # but you could map different model names to different Haystack pipelines.
@@ -111,7 +111,7 @@ def _generation_kwargs(body: dict) -> dict:
 
 
 app = FastAPI(title="Haystack OpenAI-Compatible Server")
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
 )

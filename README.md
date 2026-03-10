@@ -4,11 +4,11 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/fastapi-openai-compat.svg)](https://pypi.org/project/fastapi-openai-compat)
 [![Tests](https://github.com/deepset-ai/fastapi-openai-compat/actions/workflows/tests.yml/badge.svg)](https://github.com/deepset-ai/fastapi-openai-compat/actions/workflows/tests.yml)
 
-FastAPI router factory for OpenAI-compatible [Chat Completions](https://platform.openai.com/docs/api-reference/chat) endpoints.
+FastAPI router factory for OpenAI-compatible Chat Completions, Responses, and Files upload endpoints.
 
-Provides a configurable `APIRouter` that exposes `/v1/chat/completions` and `/v1/models` endpoints,
-following the [OpenAI API specification](https://platform.openai.com/docs/api-reference/chat),
-with support for streaming (SSE), non-streaming responses, tool calling, configurable hooks, and custom chunk mapping.
+Provides configurable router factories for OpenAI-style APIs, with support for
+streaming (SSE), non-streaming responses, tool calling, configurable hooks,
+custom chunk mapping, and callback-driven file upload handling.
 
 ## Installation
 
@@ -30,7 +30,7 @@ so they never block the async event loop.
 
 ```python
 from fastapi import FastAPI
-from fastapi_openai_compat import create_openai_router, CompletionResult
+from fastapi_openai_compat import CompletionResult, create_chat_completion_router
 
 def list_models() -> list[str]:
     return ["my-pipeline"]
@@ -40,7 +40,7 @@ def run_completion(model: str, messages: list[dict], body: dict) -> CompletionRe
     return "Hello from Haystack!"
 
 app = FastAPI()
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
 )
@@ -350,7 +350,7 @@ async def post_hook(result: CompletionResult) -> CompletionResult:
     # e.g. transform, filter
     return result
 
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
     pre_hook=pre_hook,
@@ -369,7 +369,7 @@ def log_request(request: ChatRequest) -> None:
 def log_result(result: CompletionResult) -> None:
     print(f"Got result type: {type(result).__name__}")
 
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
     pre_hook=log_request,
@@ -394,7 +394,7 @@ class MyChunk:
 def my_mapper(chunk: MyChunk) -> str:
     return chunk.text
 
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
     chunk_mapper=my_mapper,
@@ -414,17 +414,21 @@ The [`examples/`](examples/) folder contains ready-to-run servers:
 
 - **[`basic.py`](examples/basic.py)** -- Minimal echo server, no external API keys required.
 - **[`haystack_chat.py`](examples/haystack_chat.py)** -- Haystack `OpenAIChatGenerator` with streaming support.
+- **[`responses_basic.py`](examples/responses_basic.py)** -- Responses API text + streaming + function call demo.
+- **[`responses_with_files.py`](examples/responses_with_files.py)** -- Responses API with `/v1/files` upload + `input_file.file_id`.
 
 See the [examples README](examples/README.md) for setup and usage instructions.
 
 ## API reference
 
-This library implements endpoints compatible with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat).
+This library implements endpoints compatible with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat) and includes companion routers for Responses and Files upload flows.
 
-### `create_openai_router`
+### `create_chat_completion_router`
+
+`create_openai_router` is still available as a backward-compatible alias.
 
 ```python
-create_openai_router(
+create_chat_completion_router(
     *,
     list_models,
     run_completion,
@@ -456,3 +460,66 @@ The router exposes the following endpoints (with and without the `/v1` prefix):
 | `POST` | `/v1/chat/completions`      | Create a chat completion (streaming or non-streaming). |
 | `GET`  | `/models`                   | Alias for `/v1/models`. |
 | `POST` | `/chat/completions`         | Alias for `/v1/chat/completions`. |
+
+### `create_responses_router`
+
+```python
+create_responses_router(
+    *,
+    list_models,
+    run_response,
+    pre_hook=None,
+    post_hook=None,
+    chunk_mapper=default_chunk_mapper,
+    owned_by="custom",
+    tags=None,
+    include_models_endpoints=False,
+) -> APIRouter
+```
+
+| Parameter                 | Type                      | Description |
+|---------------------------|---------------------------|-------------|
+| `list_models`             | `Callable -> list[str]`   | Returns available model/pipeline names. |
+| `run_response`            | `Callable -> ResponseResult` | Runs a Responses request given `(model, input_items, body)`. |
+| `pre_hook`                | `Callable` or `None`      | Called before `run_response`. Receives `ResponseRequest`, returns modified request (transformer) or `None` (observer). |
+| `post_hook`               | `Callable` or `None`      | Called after `run_response`. Receives `ResponseResult`, returns modified result (transformer) or `None` (observer). |
+| `chunk_mapper`            | `Callable[[Any], str]`    | Converts streamed non-string chunks to strings. |
+| `owned_by`                | `str`                     | Value for `owned_by` in model objects when models endpoints are enabled. Defaults to `"custom"`. |
+| `tags`                    | `list[str]` or `None`     | OpenAPI tags for generated endpoints. Defaults to `["openai"]`. |
+| `include_models_endpoints`| `bool`                    | If true, includes `/v1/models` and `/models` in this router. Defaults to `False` to avoid conflicts when combined with chat router. |
+
+Responses router endpoints:
+
+| Method | Path            | Description |
+|--------|-----------------|-------------|
+| `POST` | `/v1/responses` | Create a Responses API response (streaming or non-streaming). |
+| `POST` | `/responses`    | Alias for `/v1/responses`. |
+
+### `create_files_router` (minimal Files upload support)
+
+```python
+create_files_router(
+    *,
+    run_file_upload,
+    tags=None,
+) -> APIRouter
+```
+
+The `run_file_upload` callback receives:
+
+- `filename`: uploaded filename, if present
+- `content_type`: uploaded content type, if present
+- `content`: full uploaded file bytes
+- `purpose`: multipart form `purpose` field
+
+It can return either:
+
+- `FileObject`
+- `dict` matching the `FileObject` schema
+
+The router exposes:
+
+| Method | Path         | Description |
+|--------|--------------|-------------|
+| `POST` | `/v1/files`  | Upload a file (`files.create(...)` compatible). |
+| `POST` | `/files`     | Alias for `/v1/files`. |
