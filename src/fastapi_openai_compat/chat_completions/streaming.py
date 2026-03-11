@@ -2,28 +2,13 @@
 
 import json
 import time
-from collections.abc import AsyncGenerator, Callable, Generator
+from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
 from fastapi.responses import StreamingResponse
 
+from fastapi_openai_compat._shared import ChunkMapper, _is_custom_event, default_chunk_mapper
 from fastapi_openai_compat.chat_completions.models import ChatCompletion, Choice, Message
-
-ChunkMapper = Callable[[Any], str]
-
-
-def default_chunk_mapper(chunk: Any) -> str:
-    """
-    Default chunk-to-string mapper.
-
-    Handles plain ``str`` chunks, objects with a ``.content`` attribute
-    (e.g. Haystack ``StreamingChunk``), and falls back to ``str(chunk)``.
-    """
-    if isinstance(chunk, str):
-        return chunk
-    if hasattr(chunk, "content"):
-        return chunk.content
-    return str(chunk)
 
 
 def event_to_sse_msg(data: dict) -> str:
@@ -56,11 +41,6 @@ def create_sse_data_msg(
 def _completion_to_sse(completion: ChatCompletion) -> str:
     """Serialize a pre-built ChatCompletion chunk to an SSE data message."""
     return f"data: {completion.model_dump_json()}\n\n"
-
-
-def _is_custom_event(chunk: Any) -> bool:
-    """Check if a chunk is a custom SSE event via duck typing (.to_event_dict())."""
-    return callable(getattr(chunk, "to_event_dict", None))
 
 
 def _has_tool_calls(chunk: Any) -> bool:
@@ -230,6 +210,7 @@ def chat_completion_response(result: str, resp_id: str, model_name: str) -> Chat
         model=model_name,
         choices=[Choice(index=0, message=Message(role="assistant", content=result), finish_reason="stop")],
     )
+
 
 __all__ = [
     "ChunkMapper",

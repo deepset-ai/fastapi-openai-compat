@@ -225,6 +225,7 @@ class ChatCompletion(OpenAIBaseModel):
         },
     )
 
+
 __all__ = [
     "ChatCompletion",
     "ChatRequest",

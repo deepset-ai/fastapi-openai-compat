@@ -1,8 +1,21 @@
-"""Backward-compatible chat streaming re-export module."""
+"""
+Backward-compatible chat streaming re-export module.
 
-from fastapi_openai_compat.chat_completions.streaming import (
+.. deprecated::
+    Import from ``fastapi_openai_compat.chat_completions.streaming`` instead.
+"""
+
+import warnings
+
+warnings.warn(
+    "Importing from 'fastapi_openai_compat.streaming' is deprecated. "
+    "Use 'fastapi_openai_compat.chat_completions.streaming' instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+from fastapi_openai_compat.chat_completions.streaming import (  # noqa: E402
     ChunkMapper,
-    _is_custom_event,
     chat_completion_response,
     create_async_streaming_response,
     create_sse_data_msg,
@@ -13,7 +26,6 @@ from fastapi_openai_compat.chat_completions.streaming import (
 
 __all__ = [
     "ChunkMapper",
-    "_is_custom_event",
     "chat_completion_response",
     "create_async_streaming_response",
     "create_sse_data_msg",

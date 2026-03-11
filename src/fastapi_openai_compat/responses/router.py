@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from fastapi_openai_compat._async_utils import ensure_async
+from fastapi_openai_compat._shared import ChunkMapper, PostHook, PreHook, default_chunk_mapper
 from fastapi_openai_compat.models_router import ListModelsFn, create_models_router
 from fastapi_openai_compat.responses.models import Response, ResponseRequest
 from fastapi_openai_compat.responses.streaming import (
@@ -16,13 +17,10 @@ from fastapi_openai_compat.responses.streaming import (
     create_responses_streaming_response,
     response_from_text,
 )
-from fastapi_openai_compat.streaming import ChunkMapper, default_chunk_mapper
 
-logger = logging.getLogger("fastapi_openai_compat")
+logger = logging.getLogger("fastapi_openai_compat.responses")
 
 ResponseResult = str | Response | Generator[Any, None, None] | AsyncGenerator[Any, None]
-PreHook = Callable[..., Any]
-PostHook = Callable[..., Any]
 RunResponseFn = Callable[..., Any]
 
 
@@ -160,9 +158,6 @@ def create_responses_router(  # noqa: PLR0913, C901
 
 
 __all__ = [
-    "ListModelsFn",
-    "PostHook",
-    "PreHook",
     "ResponseResult",
     "RunResponseFn",
     "create_responses_router",

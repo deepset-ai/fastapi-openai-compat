@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
+from fastapi_openai_compat._shared import default_chunk_mapper
 from fastapi_openai_compat.responses.models import Response
 from fastapi_openai_compat.responses.streaming import (
     create_async_responses_streaming_response,
@@ -14,7 +15,6 @@ from fastapi_openai_compat.responses.streaming import (
     format_named_sse_event,
     response_from_text,
 )
-from fastapi_openai_compat.streaming import default_chunk_mapper
 
 
 async def _collect_events(streaming_response):

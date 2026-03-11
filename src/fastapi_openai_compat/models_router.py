@@ -42,9 +42,7 @@ def create_models_router(
         "response_model": ModelsResponse,
         "tags": _tags,
         "summary": "List models",
-        "description": (
-            "Returns a list of available models (deployed pipelines) in OpenAI-compatible format."
-        ),
+        "description": ("Returns a list of available models (deployed pipelines) in OpenAI-compatible format."),
     }
 
     @router.get("/v1/models", **models_params, operation_id=_operation_id(operation_id_prefix, "models"))

@@ -10,27 +10,18 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from fastapi_openai_compat._async_utils import ensure_async
+from fastapi_openai_compat._shared import ChunkMapper, PostHook, PreHook, default_chunk_mapper
 from fastapi_openai_compat.chat_completions.models import ChatCompletion, ChatRequest
 from fastapi_openai_compat.chat_completions.streaming import (
-    ChunkMapper,
     chat_completion_response,
     create_async_streaming_response,
     create_sync_streaming_response,
-    default_chunk_mapper,
 )
 from fastapi_openai_compat.models_router import ListModelsFn, create_models_router
 
 logger = logging.getLogger("fastapi_openai_compat")
 
-# Type alias for the result of a chat completion run.
-# The run_completion callable must return one of these.
 CompletionResult = str | ChatCompletion | Generator[Any, None, None] | AsyncGenerator[Any, None]
-
-# Callback type aliases.
-# All callables accept both sync and async functions.
-# Hooks may return a value (transformer) or None (observer / fire-and-forget).
-PreHook = Callable[..., Any]
-PostHook = Callable[..., Any]
 RunCompletionFn = Callable[..., Any]
 
 
@@ -218,9 +209,9 @@ def create_openai_router(  # noqa: PLR0913
         include_models_endpoints=include_models_endpoints,
     )
 
+
 __all__ = [
     "CompletionResult",
-    "ListModelsFn",
     "PostHook",
     "PreHook",
     "RunCompletionFn",

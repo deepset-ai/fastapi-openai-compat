@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 
 
@@ -49,9 +51,12 @@ def test_chat_package_is_canonical_and_root_modules_reexport():
     from fastapi_openai_compat.chat_completions.streaming import (
         create_sync_streaming_response as create_streaming_from_package,
     )
-    from fastapi_openai_compat.models import ChatCompletion as ChatCompletionFromRoot
-    from fastapi_openai_compat.router import create_chat_completion_router as create_router_from_root
-    from fastapi_openai_compat.streaming import create_sync_streaming_response as create_streaming_from_root
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        from fastapi_openai_compat.models import ChatCompletion as ChatCompletionFromRoot
+        from fastapi_openai_compat.router import create_chat_completion_router as create_router_from_root
+        from fastapi_openai_compat.streaming import create_sync_streaming_response as create_streaming_from_root
 
     assert ChatCompletionFromPackage.__module__ == "fastapi_openai_compat.chat_completions.models"
     assert create_router_from_package.__module__ == "fastapi_openai_compat.chat_completions.router"
@@ -60,3 +65,23 @@ def test_chat_package_is_canonical_and_root_modules_reexport():
     assert ChatCompletionFromRoot is ChatCompletionFromPackage
     assert create_router_from_root is create_router_from_package
     assert create_streaming_from_root is create_streaming_from_package
+
+
+@pytest.mark.unit
+def test_root_shim_modules_emit_deprecation_warnings():
+    with pytest.warns(DeprecationWarning, match="fastapi_openai_compat.models"):
+        import importlib
+
+        import fastapi_openai_compat.models
+
+        importlib.reload(fastapi_openai_compat.models)
+
+    with pytest.warns(DeprecationWarning, match="fastapi_openai_compat.router"):
+        import fastapi_openai_compat.router
+
+        importlib.reload(fastapi_openai_compat.router)
+
+    with pytest.warns(DeprecationWarning, match="fastapi_openai_compat.streaming"):
+        import fastapi_openai_compat.streaming
+
+        importlib.reload(fastapi_openai_compat.streaming)
