@@ -26,7 +26,8 @@ def default_chunk_mapper(chunk: Any) -> str:
     if isinstance(chunk, str):
         return chunk
     if hasattr(chunk, "content"):
-        return chunk.content
+        content = chunk.content
+        return content if isinstance(content, str) else str(content) if content is not None else ""
     return str(chunk)
 
 

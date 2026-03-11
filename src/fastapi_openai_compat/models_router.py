@@ -48,12 +48,13 @@ def create_models_router(
     @router.get("/v1/models", **models_params, operation_id=_operation_id(operation_id_prefix, "models"))
     @router.get("/models", **models_params, operation_id=_operation_id(operation_id_prefix, "models_alias"))
     async def get_models() -> ModelsResponse:
-        names = await _list_models()
+        raw = await _list_models()
+        names: list[str] = list(raw) if raw else []
         return ModelsResponse(
             data=[
                 ModelObject(
-                    id=name,
-                    name=name,
+                    id=str(name),
+                    name=str(name),
                     object="model",
                     created=int(time.time()),
                     owned_by=owned_by,

@@ -18,7 +18,7 @@ from fastapi_openai_compat.chat_completions.streaming import (
 )
 from fastapi_openai_compat.models_router import ListModelsFn, create_models_router
 
-logger = logging.getLogger("fastapi_openai_compat.chat")
+logger = logging.getLogger("fastapi_openai_compat.chat_completions")
 
 CompletionResult = str | ChatCompletion | Generator[Any, None, None] | AsyncGenerator[Any, None]
 RunCompletionFn = Callable[..., Any]
