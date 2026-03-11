@@ -1,25 +1,24 @@
+"""
+FastAPI OpenAI-compatible API toolkit.
+
+Re-exports the primary public symbols for convenience. Low-level streaming
+helpers and individual SSE event constructors are available from the
+``chat_completions``, ``responses``, and ``files`` subpackages.
+"""
+
+from fastapi_openai_compat._shared import ChunkMapper, OpenAIBaseModel, PostHook, PreHook
 from fastapi_openai_compat.chat_completions import (
     ChatCompletion,
     ChatRequest,
     Choice,
-    ChunkMapper,
     CompletionResult,
     ListModelsFn,
     Message,
     ModelObject,
     ModelsResponse,
-    OpenAIBaseModel,
-    PostHook,
-    PreHook,
     RunCompletionFn,
-    chat_completion_response,
-    create_async_streaming_response,
     create_chat_completion_router,
     create_openai_router,
-    create_sse_data_msg,
-    create_sync_streaming_response,
-    default_chunk_mapper,
-    event_to_sse_msg,
 )
 from fastapi_openai_compat.files import FileObject, FileUploadResult, RunFileUploadFn, create_files_router
 from fastapi_openai_compat.models_router import create_models_router
@@ -31,20 +30,7 @@ from fastapi_openai_compat.responses import (
     ResponseRequest,
     ResponseResult,
     RunResponseFn,
-    create_async_responses_streaming_response,
-    create_function_call_arguments_delta_event,
-    create_function_call_arguments_done_event,
-    create_output_item_added_event,
-    create_output_item_done_event,
-    create_output_text_delta_event,
-    create_output_text_done_event,
-    create_response_completed_event,
-    create_response_created_event,
-    create_response_in_progress_event,
     create_responses_router,
-    create_responses_streaming_response,
-    format_named_sse_event,
-    response_from_text,
 )
 
 __all__ = [
@@ -71,28 +57,9 @@ __all__ = [
     "RunCompletionFn",
     "RunFileUploadFn",
     "RunResponseFn",
-    "chat_completion_response",
-    "create_async_responses_streaming_response",
-    "create_async_streaming_response",
     "create_chat_completion_router",
     "create_files_router",
-    "create_function_call_arguments_delta_event",
-    "create_function_call_arguments_done_event",
     "create_models_router",
     "create_openai_router",
-    "create_output_item_added_event",
-    "create_output_item_done_event",
-    "create_output_text_delta_event",
-    "create_output_text_done_event",
-    "create_response_completed_event",
-    "create_response_created_event",
-    "create_response_in_progress_event",
     "create_responses_router",
-    "create_responses_streaming_response",
-    "create_sse_data_msg",
-    "create_sync_streaming_response",
-    "default_chunk_mapper",
-    "event_to_sse_msg",
-    "format_named_sse_event",
-    "response_from_text",
 ]

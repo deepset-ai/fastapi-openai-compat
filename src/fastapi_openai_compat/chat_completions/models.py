@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from fastapi_openai_compat._shared import OpenAIBaseModel
+
 
 class ModelObject(BaseModel):
     """Represents a single model in the OpenAI /models response."""
@@ -60,12 +62,6 @@ class ModelsResponse(BaseModel):
             ]
         }
     )
-
-
-class OpenAIBaseModel(BaseModel):
-    """Base model that allows extra fields, matching OpenAI's permissive request schema."""
-
-    model_config = ConfigDict(extra="allow")
 
 
 class ChatRequest(OpenAIBaseModel):

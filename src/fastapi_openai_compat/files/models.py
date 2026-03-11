@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from fastapi_openai_compat.chat_completions.models import OpenAIBaseModel
+from fastapi_openai_compat._shared import OpenAIBaseModel
 
 
 class FileObject(OpenAIBaseModel):

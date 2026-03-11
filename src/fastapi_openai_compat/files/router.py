@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi_openai_compat._async_utils import ensure_async
 from fastapi_openai_compat.files.models import FileObject
 
-logger = logging.getLogger("fastapi_openai_compat")
+logger = logging.getLogger("fastapi_openai_compat.files")
 
 FileUploadResult = FileObject | dict[str, Any]
 RunFileUploadFn = Callable[..., Any]

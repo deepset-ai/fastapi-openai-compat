@@ -3,9 +3,17 @@
 from collections.abc import Callable
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 ChunkMapper = Callable[[Any], str]
 PreHook = Callable[..., Any]
 PostHook = Callable[..., Any]
+
+
+class OpenAIBaseModel(BaseModel):
+    """Base model that allows extra fields, matching OpenAI's permissive request schema."""
+
+    model_config = ConfigDict(extra="allow")
 
 
 def default_chunk_mapper(chunk: Any) -> str:
@@ -27,4 +35,4 @@ def _is_custom_event(chunk: Any) -> bool:
     return callable(getattr(chunk, "to_event_dict", None))
 
 
-__all__ = ["ChunkMapper", "PostHook", "PreHook", "default_chunk_mapper"]
+__all__ = ["ChunkMapper", "OpenAIBaseModel", "PostHook", "PreHook", "default_chunk_mapper"]

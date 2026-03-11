@@ -225,10 +225,10 @@ class _ResponseStreamState:
 
         events: list[str] = []
         events.extend(self._finalize_function_call())
-        events.extend(self._ensure_text_item())
+        item_id, init_events = self._ensure_text_item()
+        events.extend(init_events)
         self._text_parts.append(text)
-        assert self._text_item_id is not None
-        events.append(create_output_text_delta_event(self._text_item_id, self._output_index, self._content_index, text))
+        events.append(create_output_text_delta_event(item_id, self._output_index, self._content_index, text))
         return events
 
     def finalize(self) -> list[str]:
@@ -279,21 +279,19 @@ class _ResponseStreamState:
         if self._fc_item_id is not None and self._fc_call_id != call_id:
             events.extend(self._finalize_function_call())
 
-        events.extend(self._ensure_function_call_item(call_id, name))
+        fc_item_id, init_events = self._ensure_function_call_item(call_id, name)
+        events.extend(init_events)
         if name is not None:
             self._fc_name = name
 
         if arguments_delta:
             self._fc_arg_chunks.append(arguments_delta)
-            assert self._fc_item_id is not None
-            events.append(
-                create_function_call_arguments_delta_event(self._fc_item_id, self._output_index, arguments_delta)
-            )
+            events.append(create_function_call_arguments_delta_event(fc_item_id, self._output_index, arguments_delta))
         return events
 
-    def _ensure_text_item(self) -> list[str]:
+    def _ensure_text_item(self) -> tuple[str, list[str]]:
         if self._text_item_id is not None:
-            return []
+            return self._text_item_id, []
         self._text_item_id = f"msg_{uuid.uuid4().hex}"
         in_progress_item = {
             "id": self._text_item_id,
@@ -303,7 +301,7 @@ class _ResponseStreamState:
             "content": [],
         }
         part_template = {"type": "output_text", "text": "", "annotations": []}
-        return [
+        return self._text_item_id, [
             create_output_item_added_event(self._output_index, in_progress_item),
             create_content_part_added_event(self._text_item_id, self._output_index, self._content_index, part_template),
         ]
@@ -331,9 +329,9 @@ class _ResponseStreamState:
         self._output_index += 1
         return events
 
-    def _ensure_function_call_item(self, call_id: str, name: str | None) -> list[str]:
+    def _ensure_function_call_item(self, call_id: str, name: str | None) -> tuple[str, list[str]]:
         if self._fc_item_id is not None:
-            return []
+            return self._fc_item_id, []
         self._fc_item_id = f"fc_{uuid.uuid4().hex}"
         self._fc_call_id = call_id
         self._fc_name = name or "function"
@@ -346,7 +344,7 @@ class _ResponseStreamState:
             "name": self._fc_name,
             "arguments": "",
         }
-        return [create_output_item_added_event(self._output_index, in_progress_item)]
+        return self._fc_item_id, [create_output_item_added_event(self._output_index, in_progress_item)]
 
     def _finalize_function_call(self) -> list[str]:
         if self._fc_item_id is None:

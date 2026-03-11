@@ -1,7 +1,6 @@
 """Chat Completions router factory."""
 
 import logging
-import traceback
 import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
 from typing import Any
@@ -19,7 +18,7 @@ from fastapi_openai_compat.chat_completions.streaming import (
 )
 from fastapi_openai_compat.models_router import ListModelsFn, create_models_router
 
-logger = logging.getLogger("fastapi_openai_compat")
+logger = logging.getLogger("fastapi_openai_compat.chat")
 
 CompletionResult = str | ChatCompletion | Generator[Any, None, None] | AsyncGenerator[Any, None]
 RunCompletionFn = Callable[..., Any]
@@ -157,10 +156,8 @@ def create_chat_completion_router(  # noqa: PLR0913, C901
         except HTTPException:
             raise
         except Exception as exc:
-            error_msg = f"Pipeline execution failed: {exc!s}"
             logger.exception("Pipeline execution error")
-            error_msg += f"\n{traceback.format_exc()}"
-            raise HTTPException(status_code=500, detail=error_msg) from exc
+            raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {exc!s}") from exc
 
         if isinstance(result, ChatCompletion):
             return result
