@@ -106,10 +106,12 @@ curl http://localhost:8000/v1/responses \
 
 ## Responses files example
 
-Responses API server using `create_files_router(...)` with an in-memory upload callback for local demos of:
+Responses API server using `create_files_router(...)` with local-disk persistence for demos of:
 
 - `client.files.create(...)`
 - `input_file.file_id` in `client.responses.create(...)`
+
+Uploaded files are stored in `examples/.uploaded_files/`.
 
 ```bash
 pip install fastapi-openai-compat "fastapi[standard]" openai

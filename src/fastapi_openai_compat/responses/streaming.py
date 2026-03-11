@@ -322,6 +322,11 @@ def create_responses_streaming_response(  # noqa: C901, PLR0915
                 raw_arguments = chunk.function_call_arguments
                 arguments_delta = "" if raw_arguments is None else str(raw_arguments)
 
+                # A new call_id starts a new output item; otherwise deltas append to the active call.
+                if function_call_item_id is not None and function_call_call_id != call_id:
+                    for event in _finalize_function_call_item():
+                        yield event
+
                 for event in _start_function_call_item(call_id, name):
                     yield event
                 if name is not None:
@@ -500,6 +505,11 @@ def create_async_responses_streaming_response(  # noqa: C901, PLR0915
                 name = chunk.function_call_name if hasattr(chunk, "function_call_name") else None
                 raw_arguments = chunk.function_call_arguments
                 arguments_delta = "" if raw_arguments is None else str(raw_arguments)
+
+                # A new call_id starts a new output item; otherwise deltas append to the active call.
+                if function_call_item_id is not None and function_call_call_id != call_id:
+                    for event in _finalize_function_call_item():
+                        yield event
 
                 for event in _start_function_call_item(call_id, name):
                     yield event

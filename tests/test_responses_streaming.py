@@ -190,6 +190,34 @@ class TestResponseStreaming:
         ]
         assert done_args[0] == '{"city":"Rome"}'
 
+    def test_sync_streaming_distinct_function_calls_are_emitted_as_separate_items(self):
+        class FunctionCallChunk:
+            def __init__(self, *, call_id: str, name: str | None, arguments: str):
+                self.function_call_id = call_id
+                self.function_call_name = name
+                self.function_call_arguments = arguments
+
+        def gen():
+            yield FunctionCallChunk(call_id="call_1", name="lookup", arguments='{"q":')
+            yield FunctionCallChunk(call_id="call_1", name=None, arguments='"books"}')
+            yield FunctionCallChunk(call_id="call_2", name="weather", arguments='{"city":"Rome"}')
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+        completed_event = next(data for name, data in parsed_events if name == "response.completed")
+        output = completed_event["response"]["output"]
+
+        assert len(output) == 2
+        assert output[0]["type"] == "function_call"
+        assert output[0]["call_id"] == "call_1"
+        assert output[0]["name"] == "lookup"
+        assert output[0]["arguments"] == '{"q":"books"}'
+        assert output[1]["type"] == "function_call"
+        assert output[1]["call_id"] == "call_2"
+        assert output[1]["name"] == "weather"
+        assert output[1]["arguments"] == '{"city":"Rome"}'
+
     def test_sync_streaming_mixed_text_and_function_call_keeps_both_items(self):
         class FunctionCallChunk:
             def __init__(self, *, call_id: str, name: str | None, arguments: str):
@@ -353,3 +381,34 @@ class TestResponseStreaming:
         assert len(output) == 2
         assert output[0]["type"] == "function_call"
         assert output[1]["type"] == "message"
+
+    def test_async_streaming_distinct_function_calls_are_emitted_as_separate_items(self):
+        class FunctionCallChunk:
+            def __init__(self, *, call_id: str, name: str | None, arguments: str):
+                self.function_call_id = call_id
+                self.function_call_name = name
+                self.function_call_arguments = arguments
+
+        async def _run() -> list[str]:
+            async def gen() -> AsyncGenerator[FunctionCallChunk, None]:
+                yield FunctionCallChunk(call_id="call_1", name="lookup", arguments='{"q":')
+                yield FunctionCallChunk(call_id="call_1", name=None, arguments='"books"}')
+                yield FunctionCallChunk(call_id="call_2", name="weather", arguments='{"city":"Rome"}')
+
+            resp = create_async_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+            return await _collect_events(resp)
+
+        events = asyncio.run(_run())
+        parsed_events = [_parse_sse_event(e) for e in events]
+        completed_event = next(data for name, data in parsed_events if name == "response.completed")
+        output = completed_event["response"]["output"]
+
+        assert len(output) == 2
+        assert output[0]["type"] == "function_call"
+        assert output[0]["call_id"] == "call_1"
+        assert output[0]["name"] == "lookup"
+        assert output[0]["arguments"] == '{"q":"books"}'
+        assert output[1]["type"] == "function_call"
+        assert output[1]["call_id"] == "call_2"
+        assert output[1]["name"] == "weather"
+        assert output[1]["arguments"] == '{"city":"Rome"}'

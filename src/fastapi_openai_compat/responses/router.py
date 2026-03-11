@@ -1,18 +1,15 @@
 """Responses API router factory."""
 
-import functools
-import inspect
 import logging
-import time
 import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from fastapi_openai_compat.models import ModelObject, ModelsResponse
+from fastapi_openai_compat._async_utils import ensure_async
+from fastapi_openai_compat.models_router import ListModelsFn, create_models_router
 from fastapi_openai_compat.responses.models import Response, ResponseRequest
 from fastapi_openai_compat.responses.streaming import (
     create_async_responses_streaming_response,
@@ -26,20 +23,7 @@ logger = logging.getLogger("fastapi_openai_compat")
 ResponseResult = str | Response | Generator[Any, None, None] | AsyncGenerator[Any, None]
 PreHook = Callable[..., Any]
 PostHook = Callable[..., Any]
-ListModelsFn = Callable[..., Any]
 RunResponseFn = Callable[..., Any]
-
-
-def _ensure_async(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Wrap a sync callable to run in threadpool; return async callables as-is."""
-    if inspect.iscoroutinefunction(fn):
-        return fn
-
-    @functools.wraps(fn)
-    async def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        return await run_in_threadpool(fn, *args, **kwargs)
-
-    return _wrapper
 
 
 def _normalize_input(input_value: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -103,42 +87,23 @@ def create_responses_router(  # noqa: PLR0913, C901
             from this router. Defaults to false to allow coexistence with
             a chat-completions router in the same app.
     """
-    _list_models = _ensure_async(list_models)
-    _run_response = _ensure_async(run_response)
-    _pre_hook = _ensure_async(pre_hook) if pre_hook else _default_pre_hook
-    _post_hook = _ensure_async(post_hook) if post_hook else _default_post_hook
+    _run_response = ensure_async(run_response)
+    _pre_hook = ensure_async(pre_hook) if pre_hook else _default_pre_hook
+    _post_hook = ensure_async(post_hook) if post_hook else _default_post_hook
     _chunk_mapper = chunk_mapper
     _tags = tags or ["openai"]
 
     router = APIRouter()
 
     if include_models_endpoints:
-        models_params: dict[str, Any] = {
-            "response_model": ModelsResponse,
-            "tags": _tags,
-            "summary": "List models",
-            "description": (
-                "Returns available models in OpenAI-compatible format. Useful when using this router standalone."
-            ),
-        }
-
-        @router.get("/v1/models", **models_params, operation_id="openai_models")
-        @router.get("/models", **models_params, operation_id="openai_models_alias")
-        async def get_models() -> ModelsResponse:
-            names = await _list_models()
-            return ModelsResponse(
-                data=[
-                    ModelObject(
-                        id=name,
-                        name=name,
-                        object="model",
-                        created=int(time.time()),
-                        owned_by=owned_by,
-                    )
-                    for name in names
-                ],
-                object="list",
+        router.include_router(
+            create_models_router(
+                list_models=list_models,
+                owned_by=owned_by,
+                tags=_tags,
+                operation_id_prefix="responses_openai",
             )
+        )
 
     responses_params: dict[str, Any] = {
         "response_model": Response,

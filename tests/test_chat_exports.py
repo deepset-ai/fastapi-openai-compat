@@ -31,8 +31,32 @@ def test_chat_router_exports_and_alias_behavior():
 
 @pytest.mark.unit
 def test_chat_and_responses_module_exports():
+    from fastapi_openai_compat import create_models_router
     from fastapi_openai_compat.chat_completions import create_chat_completion_router
     from fastapi_openai_compat.responses import create_responses_router
 
     assert callable(create_chat_completion_router)
     assert callable(create_responses_router)
+    assert callable(create_models_router)
+
+
+@pytest.mark.unit
+def test_chat_package_is_canonical_and_root_modules_reexport():
+    from fastapi_openai_compat.chat_completions.models import ChatCompletion as ChatCompletionFromPackage
+    from fastapi_openai_compat.chat_completions.router import (
+        create_chat_completion_router as create_router_from_package,
+    )
+    from fastapi_openai_compat.chat_completions.streaming import (
+        create_sync_streaming_response as create_streaming_from_package,
+    )
+    from fastapi_openai_compat.models import ChatCompletion as ChatCompletionFromRoot
+    from fastapi_openai_compat.router import create_chat_completion_router as create_router_from_root
+    from fastapi_openai_compat.streaming import create_sync_streaming_response as create_streaming_from_root
+
+    assert ChatCompletionFromPackage.__module__ == "fastapi_openai_compat.chat_completions.models"
+    assert create_router_from_package.__module__ == "fastapi_openai_compat.chat_completions.router"
+    assert create_streaming_from_package.__module__ == "fastapi_openai_compat.chat_completions.streaming"
+
+    assert ChatCompletionFromRoot is ChatCompletionFromPackage
+    assert create_router_from_root is create_router_from_package
+    assert create_streaming_from_root is create_streaming_from_package

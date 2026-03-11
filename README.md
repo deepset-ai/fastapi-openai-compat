@@ -437,6 +437,7 @@ create_chat_completion_router(
     chunk_mapper=default_chunk_mapper,
     owned_by="custom",
     tags=None,
+    include_models_endpoints=True,
 ) -> APIRouter
 ```
 
@@ -449,10 +450,11 @@ create_chat_completion_router(
 | `chunk_mapper`   | `Callable[[Any], str]`    | Converts streamed chunks to strings. Default handles `str` and `.content` attribute. |
 | `owned_by`       | `str`                     | Value for the `owned_by` field in model objects. Defaults to `"custom"`. |
 | `tags`           | `list[str]` or `None`     | OpenAPI tags for the generated endpoints. Defaults to `["openai"]`. |
+| `include_models_endpoints` | `bool`          | If true, includes `/v1/models` and `/models` in this router. Defaults to `True`. |
 
 ### Endpoints
 
-The router exposes the following endpoints (with and without the `/v1` prefix):
+With `include_models_endpoints=True` (default), the router exposes:
 
 | Method | Path                        | Description |
 |--------|-----------------------------|-------------|
@@ -460,6 +462,46 @@ The router exposes the following endpoints (with and without the `/v1` prefix):
 | `POST` | `/v1/chat/completions`      | Create a chat completion (streaming or non-streaming). |
 | `GET`  | `/models`                   | Alias for `/v1/models`. |
 | `POST` | `/chat/completions`         | Alias for `/v1/chat/completions`. |
+
+### `create_models_router`
+
+```python
+create_models_router(
+    *,
+    list_models,
+    owned_by="custom",
+    tags=None,
+    operation_id_prefix="openai",
+) -> APIRouter
+```
+
+Use this when composing multiple routers and you want a single owner for `/v1/models`:
+
+```python
+from fastapi import FastAPI
+from fastapi_openai_compat import (
+    create_chat_completion_router,
+    create_models_router,
+    create_responses_router,
+)
+
+app = FastAPI()
+app.include_router(create_models_router(list_models=list_models))
+app.include_router(
+    create_chat_completion_router(
+        list_models=list_models,
+        run_completion=run_completion,
+        include_models_endpoints=False,
+    )
+)
+app.include_router(
+    create_responses_router(
+        list_models=list_models,
+        run_response=run_response,
+        include_models_endpoints=False,
+    )
+)
+```
 
 ### `create_responses_router`
 
@@ -486,7 +528,7 @@ create_responses_router(
 | `chunk_mapper`            | `Callable[[Any], str]`    | Converts streamed non-string chunks to strings. |
 | `owned_by`                | `str`                     | Value for `owned_by` in model objects when models endpoints are enabled. Defaults to `"custom"`. |
 | `tags`                    | `list[str]` or `None`     | OpenAPI tags for generated endpoints. Defaults to `["openai"]`. |
-| `include_models_endpoints`| `bool`                    | If true, includes `/v1/models` and `/models` in this router. Defaults to `False` to avoid conflicts when combined with chat router. |
+| `include_models_endpoints`| `bool`                    | If true, includes `/v1/models` and `/models` in this router. Defaults to `False` to avoid conflicts when combined with chat or a dedicated models router. |
 
 Responses router endpoints:
 

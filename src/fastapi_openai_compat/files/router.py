@@ -1,32 +1,18 @@
 """Files API router factory."""
 
-import functools
-import inspect
 import logging
 from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.concurrency import run_in_threadpool
 
+from fastapi_openai_compat._async_utils import ensure_async
 from fastapi_openai_compat.files.models import FileObject
 
 logger = logging.getLogger("fastapi_openai_compat")
 
 FileUploadResult = FileObject | dict[str, Any]
 RunFileUploadFn = Callable[..., Any]
-
-
-def _ensure_async(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Wrap a sync callable to run in a threadpool; return async callables as-is."""
-    if inspect.iscoroutinefunction(fn):
-        return fn
-
-    @functools.wraps(fn)
-    async def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        return await run_in_threadpool(fn, *args, **kwargs)
-
-    return _wrapper
 
 
 def create_files_router(
@@ -51,7 +37,7 @@ def create_files_router(
 
     The callback may return a `FileObject` or a dict matching the same schema.
     """
-    _run_file_upload = _ensure_async(run_file_upload)
+    _run_file_upload = ensure_async(run_file_upload)
     _tags = tags or ["openai"]
 
     router = APIRouter()

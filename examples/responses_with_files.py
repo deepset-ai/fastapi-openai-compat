@@ -1,9 +1,10 @@
 """
 Responses API example with file upload and file_id input flow.
 
-This example keeps files in memory and exposes:
+This example stores uploaded files on local disk and exposes:
 - POST /v1/files (via create_files_router callback)
 - POST /v1/responses
+- GET /v1/models (via create_models_router)
 
 It demonstrates OpenAI client compatibility for:
 1) file upload via files.create(...)
@@ -59,14 +60,17 @@ Python client demo:
 
 import time
 from collections.abc import Generator
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
 
-from fastapi_openai_compat import ResponseResult, create_files_router, create_responses_router
+from fastapi_openai_compat import ResponseResult, create_files_router, create_models_router, create_responses_router
 
 MODEL = "responses-files"
 FILES: dict[str, dict] = {}
+UPLOAD_DIR = Path(__file__).resolve().parent / ".uploaded_files"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def list_models() -> list[str]:
@@ -118,7 +122,7 @@ def _file_reference(part: dict) -> str | None:
         meta = FILES.get(file_id)
         if meta is None:
             return f"{file_id} (unknown)"
-        return f"{file_id} ({meta['filename']}, {meta['bytes']} bytes)"
+        return f"{file_id} ({meta['filename']}, {meta['bytes']} bytes, {meta['path']})"
 
     if "file_url" in part:
         return f"url:{part['file_url']}"
@@ -134,10 +138,16 @@ app = FastAPI(title="Responses API Files Example")
 
 def run_file_upload(filename: str | None, _content_type: str | None, content: bytes, purpose: str) -> dict:
     file_id = f"file_{len(FILES) + 1}"
+    safe_filename = Path(filename or "unknown").name
+    suffix = Path(safe_filename).suffix
+    stored_path = UPLOAD_DIR / f"{file_id}{suffix}"
+    stored_path.write_bytes(content)
+
     FILES[file_id] = {
-        "filename": filename or "unknown",
+        "filename": safe_filename,
         "purpose": purpose,
         "bytes": len(content),
+        "path": str(stored_path),
         "stored_at": int(time.time()),
     }
     return {
@@ -145,18 +155,19 @@ def run_file_upload(filename: str | None, _content_type: str | None, content: by
         "object": "file",
         "bytes": len(content),
         "created_at": int(time.time()),
-        "filename": filename,
+        "filename": safe_filename,
         "purpose": purpose,
         "status": "processed",
     }
 
 
 app.include_router(create_files_router(run_file_upload=run_file_upload))
+app.include_router(create_models_router(list_models=list_models))
 app.include_router(
     create_responses_router(
         list_models=list_models,
         run_response=run_response,
-        include_models_endpoints=True,
+        include_models_endpoints=False,
     )
 )
 

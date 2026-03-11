@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
-from fastapi_openai_compat import create_openai_router
+from fastapi_openai_compat import create_models_router, create_openai_router
 from fastapi_openai_compat.responses.models import Response
 from fastapi_openai_compat.responses.router import create_responses_router
 
@@ -269,5 +269,43 @@ def test_can_coexist_with_chat_router_in_same_app():
 
     assert models.status_code == 200
     assert models.json()["object"] == "list"
+    assert chat.status_code == 200
+    assert resp.status_code == 200
+
+
+@pytest.mark.integration
+def test_can_use_dedicated_models_router_without_shadowing():
+    app = FastAPI()
+
+    models_router = create_models_router(list_models=lambda: ["test-model"])
+    chat_router = create_openai_router(
+        list_models=lambda: ["test-model"],
+        run_completion=_chat_ok,
+        include_models_endpoints=False,
+    )
+    responses_router = create_responses_router(
+        list_models=lambda: ["test-model"],
+        run_response=_resp_ok,
+        include_models_endpoints=False,
+    )
+
+    app.include_router(models_router)
+    app.include_router(chat_router)
+    app.include_router(responses_router)
+
+    model_routes = [route for route in app.routes if getattr(route, "path", None) == "/v1/models"]
+    assert len(model_routes) == 1
+
+    with TestClient(app) as client:
+        models = client.get("/v1/models")
+        alias_models = client.get("/models")
+        chat = client.post(
+            "/v1/chat/completions",
+            json={"model": "test-model", "messages": [{"role": "user", "content": "hello"}]},
+        )
+        resp = client.post("/v1/responses", json={"model": "test-model", "input": "hello"})
+
+    assert models.status_code == 200
+    assert alias_models.status_code == 200
     assert chat.status_code == 200
     assert resp.status_code == 200

@@ -22,6 +22,7 @@ from fastapi_openai_compat.chat_completions import (
     event_to_sse_msg,
 )
 from fastapi_openai_compat.files import FileObject, FileUploadResult, RunFileUploadFn, create_files_router
+from fastapi_openai_compat.models_router import create_models_router
 from fastapi_openai_compat.responses import (
     Response,
     ResponseFunctionCall,
@@ -77,6 +78,7 @@ __all__ = [
     "create_files_router",
     "create_function_call_arguments_delta_event",
     "create_function_call_arguments_done_event",
+    "create_models_router",
     "create_openai_router",
     "create_output_item_added_event",
     "create_output_item_done_event",
