@@ -185,7 +185,11 @@ async def test_custom_events_raw_sse(raw_http_client):
     assert custom_events[1]["event"]["data"]["done"] is True
 
     completion_chunks = [e for e in events if "choices" in e]
-    contents = [c["choices"][0]["delta"]["content"] for c in completion_chunks if c["choices"][0].get("delta", {}).get("content")]
+    contents = [
+        c["choices"][0]["delta"]["content"]
+        for c in completion_chunks
+        if c["choices"][0].get("delta", {}).get("content")
+    ]
     assert contents == ["hello ", "world "]
 
     last = completion_chunks[-1]

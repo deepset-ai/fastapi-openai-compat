@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "fastapi-openai-compat"
 dynamic = ["version"]
-description = "FastAPI router factory for OpenAI-compatible Chat Completion endpoints"
+description = "FastAPI router factory for OpenAI-compatible Chat Completions, Responses, and Files endpoints"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-keywords = ["haystack", "openai", "fastapi", "chat-completion", "streaming"]
+keywords = ["haystack", "openai", "fastapi", "chat-completion", "responses-api", "streaming", "sse"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Programming Language :: Python",
@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
   "fastapi",
   "pydantic",
+  "python-multipart",
 ]
 
 [project.optional-dependencies]

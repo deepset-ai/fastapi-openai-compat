@@ -5,14 +5,14 @@ This example shows how to use fastapi-openai-compat to create a simple
 chat completion API that echoes back user messages.
 
 Run:
-    pip install fastapi-openai-compat "fastapi[standard]"
+    pip install fastapi-openai-compat "fastapi[standard]"  # includes uvicorn
     fastapi dev examples/basic.py
     # or
     python examples/basic.py
 
 Test:
     # List models
-    curl http://localhost:8000/v1/models | python -m json.tool
+    curl http://localhost:8000/v1/models | jq
 
     # Non-streaming completion
     curl http://localhost:8000/v1/chat/completions \
@@ -45,12 +45,19 @@ Test:
 """
 
 import time
-import uvicorn
 from collections.abc import Generator
 
+import uvicorn
 from fastapi import FastAPI
 
-from fastapi_openai_compat import ChatCompletion, Choice, CompletionResult, Message, create_openai_router
+from fastapi_openai_compat import (
+    ChatCompletion,
+    Choice,
+    CompletionResult,
+    Message,
+    MessageParam,
+    create_chat_completion_router,
+)
 
 
 class StatusEvent:
@@ -69,7 +76,7 @@ def list_models() -> list[str]:
     return ["echo", "echo-stream", "echo-metadata", "echo-events"]
 
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     """
     Run a chat completion.
 
@@ -132,11 +139,11 @@ def _stream_with_events(text: str) -> Generator[str | StatusEvent, None, None]:
 
 
 app = FastAPI(title="Basic OpenAI-Compatible Server")
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
 )
 app.include_router(router)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # noqa: S104

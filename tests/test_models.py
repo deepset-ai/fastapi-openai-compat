@@ -1,6 +1,13 @@
 import pytest
 
-from fastapi_openai_compat.models import ChatCompletion, ChatRequest, Choice, Message, ModelObject, ModelsResponse
+from fastapi_openai_compat.chat_completions.models import (
+    ChatCompletion,
+    ChatRequest,
+    Choice,
+    Message,
+    ModelObject,
+    ModelsResponse,
+)
 
 
 @pytest.mark.unit

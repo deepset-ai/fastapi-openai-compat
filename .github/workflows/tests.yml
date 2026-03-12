@@ -29,7 +29,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Run tests with coverage
-        run: uv run --python ${{ matrix.python-version }} pytest -vv --cov=fastapi_openai_compat tests
+        run: make test PYTHON=${{ matrix.python-version }}
 
   linting:
     runs-on: ubuntu-latest
@@ -45,11 +45,5 @@ jobs:
       - name: Set up Python
         run: uv python install 3.10
 
-      - name: Ruff check
-        run: uv run ruff check
-
-      - name: Ruff format check
-        run: uv run ruff format --check
-
-      - name: Type check
-        run: uv run ty check src/fastapi_openai_compat
+      - name: Lint, format, and type check
+        run: make check_code_quality PYTHON=3.10

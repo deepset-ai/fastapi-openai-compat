@@ -6,8 +6,8 @@ import pytest
 from haystack.dataclasses import StreamingChunk
 from haystack.dataclasses.streaming_chunk import ToolCallDelta
 
-from fastapi_openai_compat.streaming import (
-    _is_custom_event,
+from fastapi_openai_compat._shared import _is_custom_event
+from fastapi_openai_compat.chat_completions.streaming import (
     chat_completion_response,
     create_async_streaming_response,
     create_sse_data_msg,

@@ -5,7 +5,7 @@ This example builds a simple Haystack chat pipeline using OpenAIChatGenerator
 and exposes it through fastapi-openai-compat with streaming support.
 
 Prerequisites:
-    pip install fastapi-openai-compat[haystack] "fastapi[standard]"
+    pip install fastapi-openai-compat[haystack] "fastapi[standard]"  # includes uvicorn
     export OPENAI_API_KEY="sk-..."
 
 Run:
@@ -39,14 +39,14 @@ Test:
     #   "
 """
 
-import uvicorn
 from collections.abc import Generator
 
+import uvicorn
 from fastapi import FastAPI
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.dataclasses import ChatMessage, StreamingChunk
 
-from fastapi_openai_compat import CompletionResult, create_openai_router
+from fastapi_openai_compat import CompletionResult, MessageParam, create_chat_completion_router
 
 # Available models -- each one will use OpenAI under the hood,
 # but you could map different model names to different Haystack pipelines.
@@ -57,7 +57,7 @@ def list_models() -> list[str]:
     return MODELS
 
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     """
     Run a Haystack chat completion.
 
@@ -111,11 +111,11 @@ def _generation_kwargs(body: dict) -> dict:
 
 
 app = FastAPI(title="Haystack OpenAI-Compatible Server")
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
 )
 app.include_router(router)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # noqa: S104

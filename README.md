@@ -4,11 +4,34 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/fastapi-openai-compat.svg)](https://pypi.org/project/fastapi-openai-compat)
 [![Tests](https://github.com/deepset-ai/fastapi-openai-compat/actions/workflows/tests.yml/badge.svg)](https://github.com/deepset-ai/fastapi-openai-compat/actions/workflows/tests.yml)
 
-FastAPI router factory for OpenAI-compatible [Chat Completions](https://platform.openai.com/docs/api-reference/chat) endpoints.
+FastAPI router factory for OpenAI-compatible Chat Completions, Responses, and Files upload endpoints.
 
-Provides a configurable `APIRouter` that exposes `/v1/chat/completions` and `/v1/models` endpoints,
-following the [OpenAI API specification](https://platform.openai.com/docs/api-reference/chat),
-with support for streaming (SSE), non-streaming responses, tool calling, configurable hooks, and custom chunk mapping.
+Provides configurable router factories for OpenAI-style APIs, with support for
+streaming (SSE), non-streaming responses, tool calling, configurable hooks,
+custom chunk mapping, and callback-driven file upload handling.
+
+## Table of contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [A note on dict-based types](#a-note-on-dict-based-types)
+- **Chat Completions API**
+  - [The `run_completion` callable](#the-run_completion-callable)
+  - [Response types](#response-types) -- [string](#returning-a-string) &#183; [generator](#streaming-with-a-generator) &#183; [ChatCompletion](#returning-a-chatcompletion)
+  - [Tool calling](#tool-calling) -- [ChatCompletion](#returning-chatcompletion-directly) &#183; [StreamingChunk](#automatic-streamingchunk-support)
+  - [Custom SSE events](#custom-sse-events)
+  - [Hooks](#hooks) -- [transformer](#transformer-hooks) &#183; [observer](#observer-hooks)
+  - [Custom chunk mapping](#custom-chunk-mapping)
+- **Responses API**
+  - [Quick start](#quick-start-1)
+  - [The `run_response` callable](#the-run_response-callable)
+  - [Streaming text](#streaming-text)
+  - [Streaming function calls](#streaming-function-calls)
+  - [Returning a Response object](#returning-a-response-object)
+  - [Combining with chat completions](#combining-with-chat-completions)
+  - [Hooks](#hooks-1)
+- [Examples](#examples)
+- [API reference](#api-reference) -- [`create_chat_completion_router`](#create_chat_completion_router) &#183; [`create_models_router`](#create_models_router) &#183; [`create_responses_router`](#create_responses_router) &#183; [`create_files_router`](#create_files_router-minimal-files-upload-support)
 
 ## Installation
 
@@ -30,17 +53,17 @@ so they never block the async event loop.
 
 ```python
 from fastapi import FastAPI
-from fastapi_openai_compat import create_openai_router, CompletionResult
+from fastapi_openai_compat import CompletionResult, MessageParam, create_chat_completion_router
 
 def list_models() -> list[str]:
     return ["my-pipeline"]
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     # Your (potentially blocking) pipeline execution logic here
     return "Hello from Haystack!"
 
 app = FastAPI()
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
 )
@@ -53,19 +76,42 @@ Async callables work the same way:
 async def list_models() -> list[str]:
     return ["my-pipeline"]
 
-async def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+async def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     return "Hello from Haystack!"
 ```
+
+## A note on dict-based types
+
+The type aliases `MessageParam`, `InputItem`, and `OutputItem` are all
+`dict[str, Any]` -- **not** Pydantic models.  This is a deliberate design
+choice:
+
+- **Forward-compatibility.** OpenAI regularly adds new message types, content
+  part types, and input/output item types.  A strict union of Pydantic models
+  would reject unknown types and require a library release for every API
+  change.  Plain dicts let your callbacks handle new types immediately.
+- **Pass-through design.** This library validates the request *envelope*
+  (correct top-level structure) and passes the inner items through to your
+  callback unchanged.  Domain-specific validation belongs in your callback or
+  a pre-hook, not in the transport layer.
+- **Consistency.** Both Chat Completions (`messages`) and Responses API
+  (`input_items`, `output`) follow the same pattern, so you have a single
+  mental model for both.
+
+The aliases exist to give you IDE hints and self-documenting signatures.
+Each alias's docstring lists the common dict shapes you'll encounter -- check
+them in your IDE or in the
+[source](src/fastapi_openai_compat/chat_completions/models.py).
 
 ## The `run_completion` callable
 
 The `run_completion` callable receives three arguments:
 
-| Argument   | Type         | Description |
-|------------|--------------|-------------|
-| `model`    | `str`        | The model name from the request (e.g. `"my-pipeline"`). |
-| `messages` | `list[dict]` | The conversation history in OpenAI format. |
-| `body`     | `dict`       | The full request body, including all extra parameters (e.g. `temperature`, `max_tokens`, `stream`, `metadata`, `tools`). |
+| Argument   | Type                  | Description |
+|------------|-----------------------|-------------|
+| `model`    | `str`                 | The model name from the request (e.g. `"my-pipeline"`). |
+| `messages` | `list[MessageParam]`  | The conversation history in OpenAI format (see [A note on dict-based types](#a-note-on-dict-based-types)). |
+| `body`     | `dict`                | The full request body, including all extra parameters (e.g. `temperature`, `max_tokens`, `stream`, `metadata`, `tools`). |
 
 The request model accepts any additional fields beyond `model`, `messages`, and `stream`.
 These extra parameters are forwarded as-is in the `body` dict, so you can use them
@@ -75,9 +121,9 @@ For example, you can access `metadata` and any other extra field from `body`:
 
 ```python
 import time
-from fastapi_openai_compat import ChatCompletion, Choice, Message, CompletionResult
+from fastapi_openai_compat import ChatCompletion, Choice, Message, MessageParam, CompletionResult
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     metadata = body.get("metadata", {})
     temperature = body.get("temperature", 1.0)
     request_id = metadata.get("request_id", "unknown")
@@ -131,7 +177,7 @@ The simplest option -- return a plain string and the library wraps it as a
 complete `ChatCompletion` response automatically:
 
 ```python
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     last_msg = messages[-1]["content"]
     return f"You said: {last_msg}"
 ```
@@ -149,7 +195,7 @@ to return a generator or a plain string:
 ```python
 from collections.abc import Generator
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     last_msg = messages[-1]["content"]
 
     if body.get("stream", False):
@@ -166,7 +212,7 @@ Async generators work the same way:
 ```python
 from collections.abc import AsyncGenerator
 
-async def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+async def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     async def stream() -> AsyncGenerator[str, None]:
         for word in ["Hello", " from", " Haystack", "!"]:
             yield word
@@ -182,7 +228,7 @@ return a `ChatCompletion` object directly:
 import time
 from fastapi_openai_compat import ChatCompletion, Choice, Message, CompletionResult
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     return ChatCompletion(
         id="resp-1",
         object="chat.completion",
@@ -210,7 +256,7 @@ from `run_completion` for full control over the response structure:
 import time
 from fastapi_openai_compat import ChatCompletion, Choice, Message, CompletionResult
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     return ChatCompletion(
         id="resp-1",
         object="chat.completion",
@@ -238,7 +284,7 @@ Streaming tool calls work the same way -- yield `ChatCompletion` chunk objects
 from your generator and the library serializes them directly as SSE:
 
 ```python
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     def stream():
         yield ChatCompletion(
             id="resp-1", object="chat.completion.chunk",
@@ -274,7 +320,7 @@ tool call deltas and finish reasons are handled automatically via duck typing:
 from haystack.dataclasses import StreamingChunk
 from haystack.dataclasses.streaming_chunk import ToolCallDelta
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     def stream():
         yield StreamingChunk(
             content="",
@@ -317,7 +363,7 @@ class StatusEvent:
     def to_event_dict(self) -> dict:
         return {"type": "status", "data": {"description": self.description, "done": self.done}}
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     def stream() -> Generator[str | StatusEvent, None, None]:
         yield StatusEvent("Processing your request...")
         for word in ["Hello", " from", " Haystack", "!"]:
@@ -350,7 +396,7 @@ async def post_hook(result: CompletionResult) -> CompletionResult:
     # e.g. transform, filter
     return result
 
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
     pre_hook=pre_hook,
@@ -369,7 +415,7 @@ def log_request(request: ChatRequest) -> None:
 def log_result(result: CompletionResult) -> None:
     print(f"Got result type: {type(result).__name__}")
 
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
     pre_hook=log_request,
@@ -394,7 +440,7 @@ class MyChunk:
 def my_mapper(chunk: MyChunk) -> str:
     return chunk.text
 
-router = create_openai_router(
+router = create_chat_completion_router(
     list_models=list_models,
     run_completion=run_completion,
     chunk_mapper=my_mapper,
@@ -408,23 +454,188 @@ def dict_mapper(chunk: dict) -> str:
     return chunk["payload"]
 ```
 
+## Responses API
+
+The Responses API uses named SSE events (matching the
+[OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses))
+instead of the `data:`-only format used by chat completions.
+
+### Quick start
+
+```python
+from fastapi import FastAPI
+from fastapi_openai_compat import InputItem, ResponseResult, create_responses_router
+
+def list_models() -> list[str]:
+    return ["my-pipeline"]
+
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
+    return "Hello from the Responses API!"
+
+app = FastAPI()
+app.include_router(
+    create_responses_router(
+        list_models=list_models,
+        run_response=run_response,
+        include_models_endpoints=True,
+    )
+)
+```
+
+### The `run_response` callable
+
+The `run_response` callable receives three arguments:
+
+| Argument       | Type               | Description |
+|----------------|--------------------|-------------|
+| `model`        | `str`              | The model name from the request. |
+| `input_items`  | `list[InputItem]`  | Normalized input items (see [A note on dict-based types](#a-note-on-dict-based-types)). String shorthand is converted to a message item; `None` becomes `[]`. |
+| `body`         | `dict`             | The full request body, including all extra parameters (e.g. `temperature`, `tools`, `instructions`). |
+
+The return type determines how the response is formatted:
+
+| Return type      | Behavior |
+|------------------|----------|
+| `str`            | Wrapped into a `Response` with a single text output message. |
+| `Generator`      | Each yielded chunk is emitted as named SSE events (`response.output_text.delta`, etc.). |
+| `AsyncGenerator` | Same as `Generator`, but async. |
+| `Response`       | Returned as-is for full control over the response. |
+
+### Streaming text
+
+Return a generator to stream text via named SSE events. Each yielded string
+becomes a `response.output_text.delta` event. The library handles all the
+surrounding lifecycle events (`response.created`, `response.in_progress`,
+`response.output_item.added`, `response.completed`, etc.) automatically.
+
+```python
+from collections.abc import Generator
+
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
+    if body.get("stream", False):
+        def stream() -> Generator[str, None, None]:
+            for word in ["Hello", " from", " streaming", "!"]:
+                yield word
+        return stream()
+    return "Hello!"
+```
+
+### Streaming function calls
+
+Yield objects with `function_call_id`, `function_call_name`, and
+`function_call_arguments` attributes to stream function call events.
+The library emits `response.function_call_arguments.delta` events during
+streaming and a `response.output_item.done` event when the call completes.
+
+```python
+class FunctionCallChunk:
+    def __init__(self, *, call_id: str, name: str | None, arguments: str | None):
+        self.function_call_id = call_id
+        self.function_call_name = name
+        self.function_call_arguments = arguments
+
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
+    def stream():
+        yield FunctionCallChunk(call_id="call_1", name="get_weather", arguments='{"city":')
+        yield FunctionCallChunk(call_id="call_1", name=None, arguments=' "Paris"}')
+    return stream()
+```
+
+### Returning a Response object
+
+For full control, return a `Response` directly:
+
+```python
+import time
+import uuid
+from fastapi_openai_compat import Response
+
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
+    return Response(
+        id=f"resp_{uuid.uuid4().hex}",
+        created_at=int(time.time()),
+        model=model,
+        output=[{
+            "id": f"msg_{uuid.uuid4().hex}",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Hello!", "annotations": []}],
+        }],
+    )
+```
+
+### Combining with chat completions
+
+When mounting both routers in the same app, use a dedicated `create_models_router`
+to avoid duplicate `/v1/models` endpoints:
+
+```python
+from fastapi import FastAPI
+from fastapi_openai_compat import (
+    create_chat_completion_router,
+    create_models_router,
+    create_responses_router,
+)
+
+app = FastAPI()
+app.include_router(create_models_router(list_models=list_models))
+app.include_router(
+    create_chat_completion_router(
+        list_models=list_models,
+        run_completion=run_completion,
+        include_models_endpoints=False,
+    )
+)
+app.include_router(
+    create_responses_router(
+        list_models=list_models,
+        run_response=run_response,
+        include_models_endpoints=False,
+    )
+)
+```
+
+### Hooks
+
+Pre/post hooks work the same way as chat completions. The pre-hook receives
+a `ResponseRequest` and the post-hook receives a `ResponseResult`:
+
+```python
+from fastapi_openai_compat import ResponseRequest
+
+async def pre_hook(request: ResponseRequest) -> ResponseRequest:
+    # e.g. inject instructions, validate, rate-limit
+    return request
+
+router = create_responses_router(
+    list_models=list_models,
+    run_response=run_response,
+    pre_hook=pre_hook,
+)
+```
+
 ## Examples
 
 The [`examples/`](examples/) folder contains ready-to-run servers:
 
 - **[`basic.py`](examples/basic.py)** -- Minimal echo server, no external API keys required.
 - **[`haystack_chat.py`](examples/haystack_chat.py)** -- Haystack `OpenAIChatGenerator` with streaming support.
+- **[`responses_basic.py`](examples/responses_basic.py)** -- Responses API text + streaming + function call demo.
+- **[`responses_with_files.py`](examples/responses_with_files.py)** -- Responses API with `/v1/files` upload + `input_file.file_id`.
 
 See the [examples README](examples/README.md) for setup and usage instructions.
 
 ## API reference
 
-This library implements endpoints compatible with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat).
+This library implements endpoints compatible with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat), the [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses), and a minimal Files upload router.
 
-### `create_openai_router`
+### `create_chat_completion_router`
+
+`create_openai_router` is still available as a backward-compatible alias.
 
 ```python
-create_openai_router(
+create_chat_completion_router(
     *,
     list_models,
     run_completion,
@@ -433,22 +644,24 @@ create_openai_router(
     chunk_mapper=default_chunk_mapper,
     owned_by="custom",
     tags=None,
+    include_models_endpoints=True,
 ) -> APIRouter
 ```
 
 | Parameter        | Type                      | Description |
 |------------------|---------------------------|-------------|
 | `list_models`    | `Callable -> list[str]`   | Returns available model/pipeline names. |
-| `run_completion` | `Callable -> CompletionResult` | Runs a chat completion given `(model, messages, body)`. |
+| `run_completion` | `Callable -> CompletionResult` | Runs a chat completion given `(model, messages: list[MessageParam], body)`. |
 | `pre_hook`       | `Callable` or `None`      | Called before `run_completion`. Receives `ChatRequest`, returns modified request (transformer) or `None` (observer). |
 | `post_hook`      | `Callable` or `None`      | Called after `run_completion`. Receives `CompletionResult`, returns modified result (transformer) or `None` (observer). |
 | `chunk_mapper`   | `Callable[[Any], str]`    | Converts streamed chunks to strings. Default handles `str` and `.content` attribute. |
 | `owned_by`       | `str`                     | Value for the `owned_by` field in model objects. Defaults to `"custom"`. |
 | `tags`           | `list[str]` or `None`     | OpenAPI tags for the generated endpoints. Defaults to `["openai"]`. |
+| `include_models_endpoints` | `bool`          | If true, includes `/v1/models` and `/models` in this router. Defaults to `True`. |
 
 ### Endpoints
 
-The router exposes the following endpoints (with and without the `/v1` prefix):
+With `include_models_endpoints=True` (default), the router exposes:
 
 | Method | Path                        | Description |
 |--------|-----------------------------|-------------|
@@ -456,3 +669,82 @@ The router exposes the following endpoints (with and without the `/v1` prefix):
 | `POST` | `/v1/chat/completions`      | Create a chat completion (streaming or non-streaming). |
 | `GET`  | `/models`                   | Alias for `/v1/models`. |
 | `POST` | `/chat/completions`         | Alias for `/v1/chat/completions`. |
+
+### `create_models_router`
+
+```python
+create_models_router(
+    *,
+    list_models,
+    owned_by="custom",
+    tags=None,
+    operation_id_prefix="openai",
+) -> APIRouter
+```
+
+Use this when composing multiple routers and you want a single owner for
+`/v1/models`. See [Combining with chat completions](#combining-with-chat-completions)
+for a full example.
+
+### `create_responses_router`
+
+```python
+create_responses_router(
+    *,
+    list_models,
+    run_response,
+    pre_hook=None,
+    post_hook=None,
+    chunk_mapper=default_chunk_mapper,
+    owned_by="custom",
+    tags=None,
+    include_models_endpoints=False,
+) -> APIRouter
+```
+
+| Parameter                 | Type                      | Description |
+|---------------------------|---------------------------|-------------|
+| `list_models`             | `Callable -> list[str]`   | Returns available model/pipeline names. |
+| `run_response`            | `Callable -> ResponseResult` | Runs a Responses request given `(model, input_items: list[InputItem], body)`. |
+| `pre_hook`                | `Callable` or `None`      | Called before `run_response`. Receives `ResponseRequest`, returns modified request (transformer) or `None` (observer). |
+| `post_hook`               | `Callable` or `None`      | Called after `run_response`. Receives `ResponseResult`, returns modified result (transformer) or `None` (observer). |
+| `chunk_mapper`            | `Callable[[Any], str]`    | Converts streamed non-string chunks to strings. |
+| `owned_by`                | `str`                     | Value for `owned_by` in model objects when models endpoints are enabled. Defaults to `"custom"`. |
+| `tags`                    | `list[str]` or `None`     | OpenAPI tags for generated endpoints. Defaults to `["openai"]`. |
+| `include_models_endpoints`| `bool`                    | If true, includes `/v1/models` and `/models` in this router. Defaults to `False` to avoid conflicts when combined with chat or a dedicated models router. |
+
+Responses router endpoints:
+
+| Method | Path            | Description |
+|--------|-----------------|-------------|
+| `POST` | `/v1/responses` | Create a Responses API response (streaming or non-streaming). |
+| `POST` | `/responses`    | Alias for `/v1/responses`. |
+
+### `create_files_router` (minimal Files upload support)
+
+```python
+create_files_router(
+    *,
+    run_file_upload,
+    tags=None,
+) -> APIRouter
+```
+
+The `run_file_upload` callback receives:
+
+- `filename`: uploaded filename, if present
+- `content_type`: uploaded content type, if present
+- `content`: full uploaded file bytes
+- `purpose`: multipart form `purpose` field
+
+It can return either:
+
+- `FileObject`
+- `dict` matching the `FileObject` schema
+
+The router exposes:
+
+| Method | Path         | Description |
+|--------|--------------|-------------|
+| `POST` | `/v1/files`  | Upload a file (`files.create(...)` compatible). |
+| `POST` | `/files`     | Alias for `/v1/files`. |
