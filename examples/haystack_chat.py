@@ -39,9 +39,9 @@ Test:
     #   "
 """
 
-import uvicorn
 from collections.abc import Generator
 
+import uvicorn
 from fastapi import FastAPI
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.dataclasses import ChatMessage, StreamingChunk
@@ -118,4 +118,4 @@ router = create_chat_completion_router(
 app.include_router(router)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # noqa: S104

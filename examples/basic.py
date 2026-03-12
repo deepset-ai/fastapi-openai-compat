@@ -45,9 +45,9 @@ Test:
 """
 
 import time
-import uvicorn
 from collections.abc import Generator
 
+import uvicorn
 from fastapi import FastAPI
 
 from fastapi_openai_compat import ChatCompletion, Choice, CompletionResult, Message, create_chat_completion_router
@@ -139,4 +139,4 @@ router = create_chat_completion_router(
 app.include_router(router)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # noqa: S104

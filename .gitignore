@@ -51,6 +51,9 @@ dmypy.json
 # Lock file (This is a Python library, not an application)
 uv.lock
 
+# Example runtime artifacts
+examples/.uploaded_files/
+
 # OS
 .DS_Store
 Thumbs.db
