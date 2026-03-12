@@ -5,7 +5,7 @@ This example builds a simple Haystack chat pipeline using OpenAIChatGenerator
 and exposes it through fastapi-openai-compat with streaming support.
 
 Prerequisites:
-    pip install fastapi-openai-compat[haystack] "fastapi[standard]"
+    pip install fastapi-openai-compat[haystack] "fastapi[standard]"  # includes uvicorn
     export OPENAI_API_KEY="sk-..."
 
 Run:

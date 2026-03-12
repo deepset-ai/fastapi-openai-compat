@@ -11,7 +11,7 @@ It demonstrates OpenAI client compatibility for:
 2) passing input_file with file_id to responses.create(...)
 
 Run:
-    pip install fastapi-openai-compat "fastapi[standard]" openai
+    pip install fastapi-openai-compat "fastapi[standard]" openai  # fastapi[standard] includes uvicorn
     fastapi dev examples/responses_with_files.py
     # or
     python examples/responses_with_files.py

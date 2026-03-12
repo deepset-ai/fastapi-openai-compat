@@ -5,7 +5,7 @@ This example shows how to use fastapi-openai-compat to create a simple
 chat completion API that echoes back user messages.
 
 Run:
-    pip install fastapi-openai-compat "fastapi[standard]"
+    pip install fastapi-openai-compat "fastapi[standard]"  # includes uvicorn
     fastapi dev examples/basic.py
     # or
     python examples/basic.py

@@ -5,7 +5,7 @@ This example shows how to use fastapi-openai-compat to expose /v1/responses
 with non-streaming text, streaming text, and function call output.
 
 Run:
-    pip install fastapi-openai-compat "fastapi[standard]"
+    pip install fastapi-openai-compat "fastapi[standard]"  # includes uvicorn
     fastapi dev examples/responses_basic.py
     # or
     python examples/responses_basic.py
