@@ -14,6 +14,7 @@ from fastapi_openai_compat.chat_completions import (
     CompletionResult,
     ListModelsFn,
     Message,
+    MessageParam,
     ModelObject,
     ModelsResponse,
     RunCompletionFn,
@@ -23,6 +24,8 @@ from fastapi_openai_compat.chat_completions import (
 from fastapi_openai_compat.files import FileObject, FileUploadResult, RunFileUploadFn, create_files_router
 from fastapi_openai_compat.models_router import create_models_router
 from fastapi_openai_compat.responses import (
+    InputItem,
+    OutputItem,
     Response,
     ResponseFunctionCall,
     ResponseOutputMessage,
@@ -41,11 +44,14 @@ __all__ = [
     "CompletionResult",
     "FileObject",
     "FileUploadResult",
+    "InputItem",
     "ListModelsFn",
     "Message",
+    "MessageParam",
     "ModelObject",
     "ModelsResponse",
     "OpenAIBaseModel",
+    "OutputItem",
     "PostHook",
     "PreHook",
     "Response",

@@ -50,7 +50,14 @@ from collections.abc import Generator
 import uvicorn
 from fastapi import FastAPI
 
-from fastapi_openai_compat import ChatCompletion, Choice, CompletionResult, Message, create_chat_completion_router
+from fastapi_openai_compat import (
+    ChatCompletion,
+    Choice,
+    CompletionResult,
+    Message,
+    MessageParam,
+    create_chat_completion_router,
+)
 
 
 class StatusEvent:
@@ -69,7 +76,7 @@ def list_models() -> list[str]:
     return ["echo", "echo-stream", "echo-metadata", "echo-events"]
 
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     """
     Run a chat completion.
 

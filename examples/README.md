@@ -77,12 +77,20 @@ Minimal Responses API server with:
 ```bash
 pip install fastapi-openai-compat "fastapi[standard]"
 
-fastapi dev examples/responses_basic.py
-# or
 python examples/responses_basic.py
 ```
 
-Test it:
+**E2e client** (in a second terminal):
+
+```bash
+pip install openai
+python examples/responses_basic_client.py
+```
+
+The client script exercises every model (echo, streaming, function calls) using
+the official OpenAI Python client.
+
+Or test with curl:
 
 ```bash
 # List models
@@ -114,46 +122,28 @@ Responses API server using `create_files_router(...)` with local-disk persistenc
 Uploaded files are stored in `examples/.uploaded_files/`.
 
 ```bash
-pip install fastapi-openai-compat "fastapi[standard]" openai
+pip install fastapi-openai-compat "fastapi[standard]"
 
-fastapi dev examples/responses_with_files.py
-# or
 python examples/responses_with_files.py
 ```
 
-Python client test:
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="unused")
-
-uploaded = client.files.create(file=open("README.md", "rb"), purpose="user_data")
-
-response = client.responses.create(
-    model="responses-files",
-    input=[
-        {
-            "role": "user",
-            "content": [
-                {"type": "input_file", "file_id": uploaded.id},
-                {"type": "input_text", "text": "Summarize this file briefly."},
-            ],
-        }
-    ],
-)
-print(response.output[0].content[0].text)
-```
-
-Curl test:
+**E2e client** (in a second terminal):
 
 ```bash
-# Upload a local file (requires jq)
+pip install openai
+python examples/responses_with_files_client.py
+```
+
+The client script uploads a file, sends it as `input_file` with a text instruction,
+and prints the server response -- all via the official OpenAI Python client.
+
+Or test with curl (requires jq):
+
+```bash
 FILE_ID=$(curl -s http://localhost:8000/v1/files \
   -F "purpose=user_data" \
   -F "file=@README.md" | jq -r '.id')
 
-# Use file_id in a Responses request
 curl http://localhost:8000/v1/responses \
   -H "Content-Type: application/json" \
   -d "{

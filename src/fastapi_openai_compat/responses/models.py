@@ -6,12 +6,57 @@ from pydantic import Field
 
 from fastapi_openai_compat._shared import OpenAIBaseModel
 
+InputItem = dict[str, Any]
+"""A single normalized input item in OpenAI Responses API format.
+
+This is a ``dict`` alias -- not a Pydantic model -- so that the library
+stays forward-compatible when OpenAI adds new item types.  The library
+validates the outer list structure; individual item contents are passed
+through to your ``run_response`` callback as-is.
+
+Common item shapes (discriminated by ``type``)::
+
+    # User message
+    {"type": "message", "role": "user", "content": "Hello"}
+    {"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "Describe this image"},
+        {"type": "input_image", "image_url": "https://..."},
+    ]}
+
+    # Function call output (tool result returned by the client)
+    {"type": "function_call_output", "call_id": "call_abc", "output": "72°F"}
+
+See the `OpenAI Responses API reference
+<https://platform.openai.com/docs/api-reference/responses/create>`_
+for the full set of input item types.
+"""
+
+OutputItem = dict[str, Any]
+"""A single output item in a Responses API ``Response``.
+
+Same design rationale as :data:`InputItem` -- a ``dict`` alias for
+forward-compatibility.
+
+Common output shapes::
+
+    # Assistant text message
+    {"type": "message", "role": "assistant", "content": [...]}
+
+    # Function call
+    {"type": "function_call", "call_id": "call_abc",
+     "name": "get_weather", "arguments": "{\\"city\\": \\"Paris\\"}"}
+
+See the `OpenAI Responses API reference
+<https://platform.openai.com/docs/api-reference/responses/object>`_
+for the full set of output item types.
+"""
+
 
 class ResponseRequest(OpenAIBaseModel):
     """Incoming OpenAI Responses API request."""
 
     model: str = Field(description="Model ID used to generate the response.")
-    input: str | list[dict[str, Any]] | None = Field(
+    input: str | list[InputItem] | None = Field(
         default=None,
         description="Either a text shorthand, explicit input items, or omitted follow-up input.",
     )
@@ -82,7 +127,7 @@ class Response(OpenAIBaseModel):
     created_at: int = Field(description="Unix timestamp (seconds) when created.")
     status: str = Field(default="completed", description="Response status.")
     model: str = Field(description="Model that generated the response.")
-    output: list[dict[str, Any]] = Field(description="Output items (messages, tool calls, etc.).")
+    output: list[OutputItem] = Field(description="Output items (messages, tool calls, etc.).")
     usage: dict[str, Any] | None = Field(default=None, description="Token usage details.")
     error: dict[str, Any] | None = Field(default=None, description="Error payload if generation failed.")
     incomplete_details: dict[str, Any] | None = Field(
@@ -92,6 +137,8 @@ class Response(OpenAIBaseModel):
 
 
 __all__ = [
+    "InputItem",
+    "OutputItem",
     "Response",
     "ResponseFunctionCall",
     "ResponseOutputMessage",

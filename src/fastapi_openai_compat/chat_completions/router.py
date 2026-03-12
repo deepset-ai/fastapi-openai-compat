@@ -55,7 +55,7 @@ def create_chat_completion_router(  # noqa: PLR0913, C901
     Args:
         list_models: Callable returning a list of available model/pipeline names.
         run_completion: Callable that runs a chat completion given
-            ``(model, messages, body)`` and returns one of:
+            ``(model, messages: list[MessageParam], body)`` and returns one of:
 
             - ``str`` -- plain text, wrapped as ``Message(content=str)``.
             - ``ChatCompletion`` -- returned as-is (full control over

@@ -6,6 +6,34 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from fastapi_openai_compat._shared import OpenAIBaseModel
 
+MessageParam = dict[str, Any]
+"""A single chat message in OpenAI Chat Completions format.
+
+This is a ``dict`` alias -- not a Pydantic model -- so that the library
+stays forward-compatible when OpenAI adds new message shapes.  The
+library validates the outer list structure; individual message contents
+are passed through to your ``run_completion`` callback as-is.
+
+Common message shapes::
+
+    # Plain text
+    {"role": "user", "content": "Hello!"}
+    {"role": "system", "content": "You are a helpful assistant."}
+
+    # Multimodal content parts
+    {"role": "user", "content": [
+        {"type": "text", "text": "What's in this image?"},
+        {"type": "image_url", "image_url": {"url": "https://..."}},
+    ]}
+
+    # Tool result
+    {"role": "tool", "tool_call_id": "call_abc", "content": "72°F"}
+
+See the `OpenAI Chat Completions API reference
+<https://platform.openai.com/docs/api-reference/chat/create>`_
+for the full message specification.
+"""
+
 
 class ModelObject(BaseModel):
     """Represents a single model in the OpenAI /models response."""
@@ -77,7 +105,7 @@ class ChatRequest(OpenAIBaseModel):
     """
 
     model: str = Field(description="The model (pipeline) name to use for completion.")
-    messages: list[dict] = Field(
+    messages: list[MessageParam] = Field(
         description=(
             "A list of messages comprising the conversation so far. "
             "Each message is a dict with at least `role` and `content` keys. "
@@ -227,6 +255,7 @@ __all__ = [
     "ChatRequest",
     "Choice",
     "Message",
+    "MessageParam",
     "ModelObject",
     "ModelsResponse",
     "OpenAIBaseModel",

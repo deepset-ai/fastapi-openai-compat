@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from fastapi_openai_compat._async_utils import ensure_async
 from fastapi_openai_compat._shared import ChunkMapper, PostHook, PreHook, default_chunk_mapper
 from fastapi_openai_compat.models_router import ListModelsFn, create_models_router
-from fastapi_openai_compat.responses.models import Response, ResponseRequest
+from fastapi_openai_compat.responses.models import InputItem, Response, ResponseRequest
 from fastapi_openai_compat.responses.streaming import (
     create_async_responses_streaming_response,
     create_responses_streaming_response,
@@ -24,7 +24,7 @@ ResponseResult = str | Response | Generator[Any, None, None] | AsyncGenerator[An
 RunResponseFn = Callable[..., Any]
 
 
-def _normalize_input(input_value: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+def _normalize_input(input_value: str | list[InputItem] | None) -> list[InputItem]:
     if input_value is None:
         return []
     if isinstance(input_value, str):
@@ -58,13 +58,15 @@ def create_responses_router(  # noqa: PLR0913, C901
     Sync functions are automatically executed in a thread pool to avoid
     blocking the async event loop.
 
-    The `run_response` callback is invoked as `(model, input_items, body)`,
-    where:
+    The ``run_response`` callback is invoked as
+    ``(model, input_items, body)`` where:
 
-    - `model` is the selected model name from the request.
-    - `input_items` is the normalized request input (string shorthand converted
-      to a `message` input item, or an empty list when `input` is omitted).
-    - `body` is the full request body dictionary, including extra parameters.
+    - ``model`` is the selected model name from the request.
+    - ``input_items: list[InputItem]`` is the normalized request input
+      (string shorthand converted to a ``message`` input item, or an
+      empty list when ``input`` is omitted).
+    - ``body`` is the full request body dictionary, including extra
+      parameters.
 
     Args:
         list_models: Callable returning a list of available model names.

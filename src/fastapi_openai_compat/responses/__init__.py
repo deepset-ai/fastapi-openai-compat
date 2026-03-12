@@ -1,6 +1,8 @@
 """Responses API public module."""
 
 from fastapi_openai_compat.responses.models import (
+    InputItem,
+    OutputItem,
     Response,
     ResponseFunctionCall,
     ResponseOutputMessage,
@@ -25,6 +27,8 @@ from fastapi_openai_compat.responses.streaming import (
 )
 
 __all__ = [
+    "InputItem",
+    "OutputItem",
     "Response",
     "ResponseFunctionCall",
     "ResponseOutputMessage",

@@ -4,32 +4,29 @@ Basic example: OpenAI-compatible Responses API server.
 This example shows how to use fastapi-openai-compat to expose /v1/responses
 with non-streaming text, streaming text, and function call output.
 
-Run:
+Run the server:
     pip install fastapi-openai-compat "fastapi[standard]"  # includes uvicorn
-    fastapi dev examples/responses_basic.py
-    # or
     python examples/responses_basic.py
 
-Test:
-    # List models
+Run the e2e client (in a second terminal):
+    pip install openai
+    python examples/responses_basic_client.py
+
+Or test with curl:
     curl http://localhost:8000/v1/models | jq
 
-    # Non-streaming text response
     curl http://localhost:8000/v1/responses \
       -H "Content-Type: application/json" \
       -d '{"model": "responses-echo", "input": "Hello!"}' | jq
 
-    # Streaming text response (named SSE events)
     curl http://localhost:8000/v1/responses \
       -H "Content-Type: application/json" \
       -d '{"model": "responses-stream", "input": "Hello from streaming", "stream": true}'
 
-    # Streaming function call events
     curl http://localhost:8000/v1/responses \
       -H "Content-Type: application/json" \
       -d '{"model": "responses-function", "input": "Weather in Paris?", "stream": true}'
 
-    # Non-streaming function call output item
     curl http://localhost:8000/v1/responses \
       -H "Content-Type: application/json" \
       -d '{"model": "responses-function", "input": "Weather in Paris?"}' | jq
@@ -43,7 +40,7 @@ from collections.abc import Generator
 import uvicorn
 from fastapi import FastAPI
 
-from fastapi_openai_compat import Response, ResponseResult, create_responses_router
+from fastapi_openai_compat import InputItem, Response, ResponseResult, create_responses_router
 
 MODELS = ["responses-echo", "responses-stream", "responses-function"]
 
@@ -61,7 +58,7 @@ def list_models() -> list[str]:
     return MODELS
 
 
-def run_response(model: str, input_items: list[dict], body: dict) -> ResponseResult:
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
     user_text = _extract_user_text(input_items)
     stream = bool(body.get("stream", False))
 
@@ -76,22 +73,20 @@ def run_response(model: str, input_items: list[dict], body: dict) -> ResponseRes
     return f"You said: {user_text or 'No input provided.'}"
 
 
-def _extract_user_text(input_items: list[dict]) -> str:
+def _extract_user_text(input_items: list[InputItem]) -> str:
+    """Extract user text from normalized input items."""
     collected: list[str] = []
     for item in input_items:
-        if not isinstance(item, dict) or item.get("role") != "user":
+        if item.get("role") != "user":
             continue
         content = item.get("content")
         if isinstance(content, str):
             collected.append(content)
-            continue
-        if isinstance(content, list):
+        elif isinstance(content, list):
             for part in content:
-                if not isinstance(part, dict):
-                    continue
                 if part.get("type") == "input_text":
-                    collected.append(str(part.get("text", "")))
-    return " ".join(chunk for chunk in collected if chunk).strip()
+                    collected.append(part.get("text", ""))
+    return " ".join(collected).strip()
 
 
 def _stream_words(text: str) -> Generator[str, None, None]:

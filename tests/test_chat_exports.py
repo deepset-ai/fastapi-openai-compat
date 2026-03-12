@@ -33,13 +33,16 @@ def test_chat_router_exports_and_alias_behavior():
 
 @pytest.mark.unit
 def test_chat_and_responses_module_exports():
-    from fastapi_openai_compat import create_models_router
+    from fastapi_openai_compat import MessageParam, create_models_router
     from fastapi_openai_compat.chat_completions import create_chat_completion_router
-    from fastapi_openai_compat.responses import create_responses_router
+    from fastapi_openai_compat.responses import InputItem, OutputItem, create_responses_router
 
     assert callable(create_chat_completion_router)
     assert callable(create_responses_router)
     assert callable(create_models_router)
+    assert MessageParam.__origin__ is dict
+    assert InputItem.__origin__ is dict
+    assert OutputItem.__origin__ is dict
 
 
 @pytest.mark.unit

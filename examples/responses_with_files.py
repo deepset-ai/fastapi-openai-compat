@@ -10,13 +10,15 @@ It demonstrates OpenAI client compatibility for:
 1) file upload via files.create(...)
 2) passing input_file with file_id to responses.create(...)
 
-Run:
-    pip install fastapi-openai-compat "fastapi[standard]" openai  # fastapi[standard] includes uvicorn
-    fastapi dev examples/responses_with_files.py
-    # or
+Run the server:
+    pip install fastapi-openai-compat "fastapi[standard]"  # includes uvicorn
     python examples/responses_with_files.py
 
-Curl demo (requires jq):
+Run the e2e client (in a second terminal):
+    pip install openai
+    python examples/responses_with_files_client.py
+
+Or test with curl (requires jq):
     FILE_ID=$(curl -s http://localhost:8000/v1/files \
       -F "purpose=user_data" \
       -F "file=@README.md" | jq -r '.id')
@@ -33,29 +35,6 @@ Curl demo (requires jq):
           ]
         }]
       }" | jq
-
-Python client demo:
-    from openai import OpenAI
-    client = OpenAI(base_url="http://localhost:8000/v1", api_key="unused")
-
-    uploaded = client.files.create(
-        file=open("README.md", "rb"),
-        purpose="user_data",
-    )
-
-    response = client.responses.create(
-        model="responses-files",
-        input=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_file", "file_id": uploaded.id},
-                    {"type": "input_text", "text": "Summarize this file briefly."},
-                ],
-            }
-        ],
-    )
-    print(response.output[0].content[0].text)
 """
 
 import time
@@ -65,7 +44,13 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 
-from fastapi_openai_compat import ResponseResult, create_files_router, create_models_router, create_responses_router
+from fastapi_openai_compat import (
+    InputItem,
+    ResponseResult,
+    create_files_router,
+    create_models_router,
+    create_responses_router,
+)
 
 MODEL = "responses-files"
 FILES: dict[str, dict] = {}
@@ -77,7 +62,7 @@ def list_models() -> list[str]:
     return [MODEL]
 
 
-def run_response(model: str, input_items: list[dict], body: dict) -> ResponseResult:
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
     _ = body
     references: list[str] = []
     instructions: list[str] = []
@@ -101,16 +86,12 @@ def run_response(model: str, input_items: list[dict], body: dict) -> ResponseRes
     return f"Model {model} received files: {refs}. Instruction: {instruction}"
 
 
-def _iter_content_parts(input_items: list[dict]) -> Generator[dict, None, None]:
+def _iter_content_parts(input_items: list[InputItem]) -> Generator[dict, None, None]:
     for item in input_items:
-        if not isinstance(item, dict):
-            continue
         content = item.get("content")
         if not isinstance(content, list):
             continue
-        for part in content:
-            if isinstance(part, dict):
-                yield part
+        yield from content
 
 
 def _file_reference(part: dict) -> str | None:

@@ -10,6 +10,29 @@ Provides configurable router factories for OpenAI-style APIs, with support for
 streaming (SSE), non-streaming responses, tool calling, configurable hooks,
 custom chunk mapping, and callback-driven file upload handling.
 
+## Table of contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [A note on dict-based types](#a-note-on-dict-based-types)
+- **Chat Completions API**
+  - [The `run_completion` callable](#the-run_completion-callable)
+  - [Response types](#response-types) -- [string](#returning-a-string) &#183; [generator](#streaming-with-a-generator) &#183; [ChatCompletion](#returning-a-chatcompletion)
+  - [Tool calling](#tool-calling) -- [ChatCompletion](#returning-chatcompletion-directly) &#183; [StreamingChunk](#automatic-streamingchunk-support)
+  - [Custom SSE events](#custom-sse-events)
+  - [Hooks](#hooks) -- [transformer](#transformer-hooks) &#183; [observer](#observer-hooks)
+  - [Custom chunk mapping](#custom-chunk-mapping)
+- **Responses API**
+  - [Quick start](#quick-start-1)
+  - [The `run_response` callable](#the-run_response-callable)
+  - [Streaming text](#streaming-text)
+  - [Streaming function calls](#streaming-function-calls)
+  - [Returning a Response object](#returning-a-response-object)
+  - [Combining with chat completions](#combining-with-chat-completions)
+  - [Hooks](#hooks-1)
+- [Examples](#examples)
+- [API reference](#api-reference) -- [`create_chat_completion_router`](#create_chat_completion_router) &#183; [`create_models_router`](#create_models_router) &#183; [`create_responses_router`](#create_responses_router) &#183; [`create_files_router`](#create_files_router-minimal-files-upload-support)
+
 ## Installation
 
 ```bash
@@ -30,12 +53,12 @@ so they never block the async event loop.
 
 ```python
 from fastapi import FastAPI
-from fastapi_openai_compat import CompletionResult, create_chat_completion_router
+from fastapi_openai_compat import CompletionResult, MessageParam, create_chat_completion_router
 
 def list_models() -> list[str]:
     return ["my-pipeline"]
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     # Your (potentially blocking) pipeline execution logic here
     return "Hello from Haystack!"
 
@@ -53,19 +76,42 @@ Async callables work the same way:
 async def list_models() -> list[str]:
     return ["my-pipeline"]
 
-async def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+async def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     return "Hello from Haystack!"
 ```
+
+## A note on dict-based types
+
+The type aliases `MessageParam`, `InputItem`, and `OutputItem` are all
+`dict[str, Any]` -- **not** Pydantic models.  This is a deliberate design
+choice:
+
+- **Forward-compatibility.** OpenAI regularly adds new message types, content
+  part types, and input/output item types.  A strict union of Pydantic models
+  would reject unknown types and require a library release for every API
+  change.  Plain dicts let your callbacks handle new types immediately.
+- **Pass-through design.** This library validates the request *envelope*
+  (correct top-level structure) and passes the inner items through to your
+  callback unchanged.  Domain-specific validation belongs in your callback or
+  a pre-hook, not in the transport layer.
+- **Consistency.** Both Chat Completions (`messages`) and Responses API
+  (`input_items`, `output`) follow the same pattern, so you have a single
+  mental model for both.
+
+The aliases exist to give you IDE hints and self-documenting signatures.
+Each alias's docstring lists the common dict shapes you'll encounter -- check
+them in your IDE or in the
+[source](src/fastapi_openai_compat/chat_completions/models.py).
 
 ## The `run_completion` callable
 
 The `run_completion` callable receives three arguments:
 
-| Argument   | Type         | Description |
-|------------|--------------|-------------|
-| `model`    | `str`        | The model name from the request (e.g. `"my-pipeline"`). |
-| `messages` | `list[dict]` | The conversation history in OpenAI format. |
-| `body`     | `dict`       | The full request body, including all extra parameters (e.g. `temperature`, `max_tokens`, `stream`, `metadata`, `tools`). |
+| Argument   | Type                  | Description |
+|------------|-----------------------|-------------|
+| `model`    | `str`                 | The model name from the request (e.g. `"my-pipeline"`). |
+| `messages` | `list[MessageParam]`  | The conversation history in OpenAI format (see [A note on dict-based types](#a-note-on-dict-based-types)). |
+| `body`     | `dict`                | The full request body, including all extra parameters (e.g. `temperature`, `max_tokens`, `stream`, `metadata`, `tools`). |
 
 The request model accepts any additional fields beyond `model`, `messages`, and `stream`.
 These extra parameters are forwarded as-is in the `body` dict, so you can use them
@@ -75,9 +121,9 @@ For example, you can access `metadata` and any other extra field from `body`:
 
 ```python
 import time
-from fastapi_openai_compat import ChatCompletion, Choice, Message, CompletionResult
+from fastapi_openai_compat import ChatCompletion, Choice, Message, MessageParam, CompletionResult
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     metadata = body.get("metadata", {})
     temperature = body.get("temperature", 1.0)
     request_id = metadata.get("request_id", "unknown")
@@ -131,7 +177,7 @@ The simplest option -- return a plain string and the library wraps it as a
 complete `ChatCompletion` response automatically:
 
 ```python
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     last_msg = messages[-1]["content"]
     return f"You said: {last_msg}"
 ```
@@ -149,7 +195,7 @@ to return a generator or a plain string:
 ```python
 from collections.abc import Generator
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     last_msg = messages[-1]["content"]
 
     if body.get("stream", False):
@@ -166,7 +212,7 @@ Async generators work the same way:
 ```python
 from collections.abc import AsyncGenerator
 
-async def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+async def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     async def stream() -> AsyncGenerator[str, None]:
         for word in ["Hello", " from", " Haystack", "!"]:
             yield word
@@ -182,7 +228,7 @@ return a `ChatCompletion` object directly:
 import time
 from fastapi_openai_compat import ChatCompletion, Choice, Message, CompletionResult
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     return ChatCompletion(
         id="resp-1",
         object="chat.completion",
@@ -210,7 +256,7 @@ from `run_completion` for full control over the response structure:
 import time
 from fastapi_openai_compat import ChatCompletion, Choice, Message, CompletionResult
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     return ChatCompletion(
         id="resp-1",
         object="chat.completion",
@@ -238,7 +284,7 @@ Streaming tool calls work the same way -- yield `ChatCompletion` chunk objects
 from your generator and the library serializes them directly as SSE:
 
 ```python
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     def stream():
         yield ChatCompletion(
             id="resp-1", object="chat.completion.chunk",
@@ -274,7 +320,7 @@ tool call deltas and finish reasons are handled automatically via duck typing:
 from haystack.dataclasses import StreamingChunk
 from haystack.dataclasses.streaming_chunk import ToolCallDelta
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     def stream():
         yield StreamingChunk(
             content="",
@@ -317,7 +363,7 @@ class StatusEvent:
     def to_event_dict(self) -> dict:
         return {"type": "status", "data": {"description": self.description, "done": self.done}}
 
-def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
     def stream() -> Generator[str | StatusEvent, None, None]:
         yield StatusEvent("Processing your request...")
         for word in ["Hello", " from", " Haystack", "!"]:
@@ -418,12 +464,12 @@ instead of the `data:`-only format used by chat completions.
 
 ```python
 from fastapi import FastAPI
-from fastapi_openai_compat import ResponseResult, create_responses_router
+from fastapi_openai_compat import InputItem, ResponseResult, create_responses_router
 
 def list_models() -> list[str]:
     return ["my-pipeline"]
 
-def run_response(model: str, input_items: list[dict], body: dict) -> ResponseResult:
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
     return "Hello from the Responses API!"
 
 app = FastAPI()
@@ -440,11 +486,11 @@ app.include_router(
 
 The `run_response` callable receives three arguments:
 
-| Argument       | Type         | Description |
-|----------------|--------------|-------------|
-| `model`        | `str`        | The model name from the request. |
-| `input_items`  | `list[dict]` | Normalized input items. String shorthand is converted to a message item; `None` becomes `[]`. |
-| `body`         | `dict`       | The full request body, including all extra parameters (e.g. `temperature`, `tools`, `instructions`). |
+| Argument       | Type               | Description |
+|----------------|--------------------|-------------|
+| `model`        | `str`              | The model name from the request. |
+| `input_items`  | `list[InputItem]`  | Normalized input items (see [A note on dict-based types](#a-note-on-dict-based-types)). String shorthand is converted to a message item; `None` becomes `[]`. |
+| `body`         | `dict`             | The full request body, including all extra parameters (e.g. `temperature`, `tools`, `instructions`). |
 
 The return type determines how the response is formatted:
 
@@ -465,7 +511,7 @@ surrounding lifecycle events (`response.created`, `response.in_progress`,
 ```python
 from collections.abc import Generator
 
-def run_response(model: str, input_items: list[dict], body: dict) -> ResponseResult:
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
     if body.get("stream", False):
         def stream() -> Generator[str, None, None]:
             for word in ["Hello", " from", " streaming", "!"]:
@@ -488,7 +534,7 @@ class FunctionCallChunk:
         self.function_call_name = name
         self.function_call_arguments = arguments
 
-def run_response(model: str, input_items: list[dict], body: dict) -> ResponseResult:
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
     def stream():
         yield FunctionCallChunk(call_id="call_1", name="get_weather", arguments='{"city":')
         yield FunctionCallChunk(call_id="call_1", name=None, arguments=' "Paris"}')
@@ -504,7 +550,7 @@ import time
 import uuid
 from fastapi_openai_compat import Response
 
-def run_response(model: str, input_items: list[dict], body: dict) -> ResponseResult:
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
     return Response(
         id=f"resp_{uuid.uuid4().hex}",
         created_at=int(time.time()),
@@ -605,7 +651,7 @@ create_chat_completion_router(
 | Parameter        | Type                      | Description |
 |------------------|---------------------------|-------------|
 | `list_models`    | `Callable -> list[str]`   | Returns available model/pipeline names. |
-| `run_completion` | `Callable -> CompletionResult` | Runs a chat completion given `(model, messages, body)`. |
+| `run_completion` | `Callable -> CompletionResult` | Runs a chat completion given `(model, messages: list[MessageParam], body)`. |
 | `pre_hook`       | `Callable` or `None`      | Called before `run_completion`. Receives `ChatRequest`, returns modified request (transformer) or `None` (observer). |
 | `post_hook`      | `Callable` or `None`      | Called after `run_completion`. Receives `CompletionResult`, returns modified result (transformer) or `None` (observer). |
 | `chunk_mapper`   | `Callable[[Any], str]`    | Converts streamed chunks to strings. Default handles `str` and `.content` attribute. |
@@ -659,7 +705,7 @@ create_responses_router(
 | Parameter                 | Type                      | Description |
 |---------------------------|---------------------------|-------------|
 | `list_models`             | `Callable -> list[str]`   | Returns available model/pipeline names. |
-| `run_response`            | `Callable -> ResponseResult` | Runs a Responses request given `(model, input_items, body)`. |
+| `run_response`            | `Callable -> ResponseResult` | Runs a Responses request given `(model, input_items: list[InputItem], body)`. |
 | `pre_hook`                | `Callable` or `None`      | Called before `run_response`. Receives `ResponseRequest`, returns modified request (transformer) or `None` (observer). |
 | `post_hook`               | `Callable` or `None`      | Called after `run_response`. Receives `ResponseResult`, returns modified result (transformer) or `None` (observer). |
 | `chunk_mapper`            | `Callable[[Any], str]`    | Converts streamed non-string chunks to strings. |
