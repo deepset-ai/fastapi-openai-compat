@@ -511,7 +511,9 @@ class TestResponseStreamingToolCalls:
         def gen():
             yield "Thinking..."
             yield FakeChunk(
-                tool_calls=[FakeToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments='{"city":"Rome"}')],
+                tool_calls=[
+                    FakeToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments='{"city":"Rome"}')
+                ],
             )
 
         resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
