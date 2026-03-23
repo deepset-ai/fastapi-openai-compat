@@ -216,8 +216,12 @@ class _ResponseStreamState:
             event_name = event.get("type", "response.event")
             return [format_named_sse_event(event_name, event)]
 
-        if self._is_function_call_chunk(chunk):
-            return self._handle_function_call(chunk)
+        fc_deltas = self._extract_function_call_deltas(chunk)
+        if fc_deltas is not None:
+            events: list[str] = []
+            for call_id, name, arguments in fc_deltas:
+                events.extend(self._handle_function_call_delta(call_id, name, arguments))
+            return events
 
         text = self._text_from_chunk(chunk)
         if not text:
@@ -259,22 +263,45 @@ class _ResponseStreamState:
         mapped = self._chunk_mapper(chunk)
         return mapped if isinstance(mapped, str) else str(mapped)
 
-    @staticmethod
-    def _is_function_call_chunk(chunk: Any) -> bool:
-        return (
+    def _extract_function_call_deltas(self, chunk: Any) -> list[tuple[str, str | None, Any]] | None:
+        """
+        Normalize both chunk formats into ``[(call_id, name, arguments), ...]``.
+
+        Recognises two shapes:
+        * **Explicit attributes** -- ``function_call_id``, ``function_call_name``,
+          ``function_call_arguments`` (one delta per chunk).
+        * **tool_calls list** -- ``chunk.tool_calls``, each entry carrying
+          ``.id``, ``.tool_name`` / ``.name``, ``.arguments`` (Haystack
+          ``StreamingChunk`` / ``ToolCallDelta`` style).
+
+        Returns ``None`` when the chunk is neither format.
+        """
+        if (
             hasattr(chunk, "function_call_id")
             and chunk.function_call_id is not None
             and hasattr(chunk, "function_call_arguments")
-        )
+        ):
+            name = chunk.function_call_name if hasattr(chunk, "function_call_name") else None
+            return [(str(chunk.function_call_id), name, chunk.function_call_arguments)]
 
-    def _handle_function_call(self, chunk: Any) -> list[str]:
+        tool_calls = getattr(chunk, "tool_calls", None)
+        if tool_calls:
+            deltas: list[tuple[str, str | None, Any]] = []
+            for tc in tool_calls:
+                call_id = getattr(tc, "id", None)
+                if call_id is None:
+                    call_id = self._fc_call_id or f"call_{uuid.uuid4().hex}"
+                tc_name = getattr(tc, "tool_name", None) or getattr(tc, "name", None)
+                deltas.append((str(call_id), tc_name, getattr(tc, "arguments", None)))
+            return deltas
+
+        return None
+
+    def _handle_function_call_delta(self, call_id: str, name: str | None, arguments: Any) -> list[str]:
         events: list[str] = []
         events.extend(self._finalize_text())
 
-        call_id = str(chunk.function_call_id)
-        name = chunk.function_call_name if hasattr(chunk, "function_call_name") else None
-        raw_arguments = chunk.function_call_arguments
-        arguments_delta = "" if raw_arguments is None else str(raw_arguments)
+        arguments_delta = "" if arguments is None else str(arguments)
 
         if self._fc_item_id is not None and self._fc_call_id != call_id:
             events.extend(self._finalize_function_call())

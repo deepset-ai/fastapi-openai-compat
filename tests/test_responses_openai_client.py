@@ -184,6 +184,53 @@ def test_openai_responses_create_function_call_output_item():
 
 
 @pytest.mark.integration
+def test_openai_responses_streaming_tool_calls_via_streaming_chunk():
+    """OpenAI SDK parses function_call events from Haystack StreamingChunk + ToolCallDelta."""
+    from haystack.dataclasses import StreamingChunk
+    from haystack.dataclasses.streaming_chunk import ToolCallDelta
+
+    def run_response(_model, _input_items, body):
+        if body.get("stream"):
+
+            def _gen() -> Generator[StreamingChunk, None, None]:
+                yield StreamingChunk(
+                    content="",
+                    tool_calls=[ToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments='{"city":')],
+                    index=0,
+                )
+                yield StreamingChunk(
+                    content="",
+                    tool_calls=[ToolCallDelta(index=0, arguments='"Paris"}')],
+                    index=0,
+                )
+
+            return _gen()
+        return "not-streamed"
+
+    async def _run() -> None:
+        async with _openai_client_for(run_response) as (client, _):
+            stream = await client.responses.create(model="test-model", input="Weather?", stream=True)
+
+            event_types: list[str] = []
+            argument_deltas: list[str] = []
+            final_arguments: list[str] = []
+            async for event in stream:
+                event_types.append(event.type)
+                if event.type == "response.function_call_arguments.delta":
+                    argument_deltas.append(event.delta)
+                if event.type == "response.function_call_arguments.done":
+                    final_arguments.append(event.arguments)
+
+            assert "response.function_call_arguments.delta" in event_types
+            assert "response.function_call_arguments.done" in event_types
+            assert "response.output_item.done" in event_types
+            assert "".join(argument_deltas) == '{"city":"Paris"}'
+            assert final_arguments[0] == '{"city":"Paris"}'
+
+    asyncio.run(_run())
+
+
+@pytest.mark.integration
 def test_openai_responses_multimodal_input_image_and_file_url():
     def run_response(_model, input_items, _body):
         content_items = input_items[0]["content"]

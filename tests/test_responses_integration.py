@@ -274,6 +274,79 @@ def test_can_coexist_with_chat_router_in_same_app():
 
 
 @pytest.mark.integration
+def test_streaming_tool_calls_via_streaming_chunk():
+    """Full HTTP round-trip: StreamingChunk + ToolCallDelta → SSE function_call events."""
+    from haystack.dataclasses import StreamingChunk
+    from haystack.dataclasses.streaming_chunk import ToolCallDelta
+
+    def run_response(_model, _input_items, body):
+        if body.get("stream"):
+
+            def _gen():
+                yield StreamingChunk(
+                    content="",
+                    tool_calls=[ToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments='{"city":')],
+                    index=0,
+                )
+                yield StreamingChunk(
+                    content="",
+                    tool_calls=[ToolCallDelta(index=0, arguments='"Paris"}')],
+                    index=0,
+                )
+
+            return _gen()
+        return "not-streamed"
+
+    app = _make_app(run_response)
+    with TestClient(app) as client:
+        resp = client.post("/v1/responses", json={"model": "test-model", "input": "weather?", "stream": True})
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    blocks = [block for block in resp.text.split("\n\n") if block.strip()]
+    event_names = [
+        line.removeprefix("event: ") for block in blocks for line in block.split("\n") if line.startswith("event: ")
+    ]
+    assert "response.created" in event_names
+    assert "response.function_call_arguments.delta" in event_names
+    assert "response.function_call_arguments.done" in event_names
+    assert "response.output_item.done" in event_names
+    assert "response.completed" in event_names
+
+
+@pytest.mark.integration
+def test_streaming_tool_calls_async():
+    """Async version: StreamingChunk + ToolCallDelta through the Responses API."""
+    from haystack.dataclasses import StreamingChunk
+    from haystack.dataclasses.streaming_chunk import ToolCallDelta
+
+    async def run_response(_model, _input_items, body):
+        if body.get("stream"):
+
+            async def _gen():
+                yield StreamingChunk(
+                    content="",
+                    tool_calls=[ToolCallDelta(index=0, id="call_1", tool_name="search", arguments='{"q":"test"}')],
+                    index=0,
+                )
+
+            return _gen()
+        return "not-streamed"
+
+    app = _make_app(run_response)
+    with TestClient(app) as client:
+        resp = client.post("/v1/responses", json={"model": "test-model", "input": "search", "stream": True})
+
+    assert resp.status_code == 200
+    blocks = [block for block in resp.text.split("\n\n") if block.strip()]
+    event_names = [
+        line.removeprefix("event: ") for block in blocks for line in block.split("\n") if line.startswith("event: ")
+    ]
+    assert "response.function_call_arguments.delta" in event_names
+    assert "response.function_call_arguments.done" in event_names
+
+
+@pytest.mark.integration
 def test_can_use_dedicated_models_router_without_shadowing():
     app = FastAPI()
 

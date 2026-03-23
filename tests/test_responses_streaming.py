@@ -412,3 +412,227 @@ class TestResponseStreaming:
         assert output[1]["call_id"] == "call_2"
         assert output[1]["name"] == "weather"
         assert output[1]["arguments"] == '{"city":"Rome"}'
+
+
+@pytest.mark.unit
+class TestResponseStreamingToolCalls:
+    """Tests for tool_calls-style chunks (Haystack StreamingChunk format) in Responses API."""
+
+    def test_sync_streaming_tool_calls_chunk(self):
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class FakeToolCallDelta:
+            index: int
+            tool_name: str = ""
+            arguments: str = ""
+            id: str | None = None
+
+        @dataclass
+        class FakeChunk:
+            content: str = ""
+            tool_calls: list | None = field(default=None)
+
+        def gen():
+            yield FakeChunk(
+                tool_calls=[FakeToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments='{"city":')],
+            )
+            yield FakeChunk(
+                tool_calls=[FakeToolCallDelta(index=0, arguments='"Paris"}')],
+            )
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+
+        event_names = [name for name, _ in parsed_events]
+        assert "response.output_item.added" in event_names
+        assert "response.function_call_arguments.delta" in event_names
+        assert "response.function_call_arguments.done" in event_names
+        assert "response.output_item.done" in event_names
+
+        deltas = [data for name, data in parsed_events if name == "response.function_call_arguments.delta"]
+        assert deltas[0]["delta"] == '{"city":'
+        assert deltas[1]["delta"] == '"Paris"}'
+
+        done_args = [data for name, data in parsed_events if name == "response.function_call_arguments.done"]
+        assert done_args[0]["arguments"] == '{"city":"Paris"}'
+
+        output_items_done = [data for name, data in parsed_events if name == "response.output_item.done"]
+        item = output_items_done[0]["item"]
+        assert item["type"] == "function_call"
+        assert item["call_id"] == "call_1"
+        assert item["name"] == "get_weather"
+
+    def test_sync_streaming_tool_calls_name_via_name_attr(self):
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class AltToolCall:
+            index: int
+            name: str
+            arguments: str
+            id: str | None = None
+
+        @dataclass
+        class AltChunk:
+            content: str = ""
+            tool_calls: list | None = field(default=None)
+
+        def gen():
+            yield AltChunk(
+                tool_calls=[AltToolCall(index=0, id="call_1", name="search", arguments='{"q":"test"}')],
+            )
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+
+        output_items_done = [data for name, data in parsed_events if name == "response.output_item.done"]
+        item = output_items_done[0]["item"]
+        assert item["name"] == "search"
+        assert item["arguments"] == '{"q":"test"}'
+
+    def test_sync_streaming_mixed_text_then_tool_calls(self):
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class FakeToolCallDelta:
+            index: int
+            tool_name: str
+            arguments: str
+            id: str | None = None
+
+        @dataclass
+        class FakeChunk:
+            content: str = ""
+            tool_calls: list | None = field(default=None)
+
+        def gen():
+            yield "Thinking..."
+            yield FakeChunk(
+                tool_calls=[FakeToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments='{"city":"Rome"}')],
+            )
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+
+        completed_event = next(data for name, data in parsed_events if name == "response.completed")
+        output = completed_event["response"]["output"]
+        assert len(output) == 2
+        assert output[0]["type"] == "message"
+        assert output[1]["type"] == "function_call"
+
+    def test_sync_streaming_distinct_tool_calls_are_separate_items(self):
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class FakeToolCallDelta:
+            index: int
+            tool_name: str = ""
+            arguments: str = ""
+            id: str | None = None
+
+        @dataclass
+        class FakeChunk:
+            content: str = ""
+            tool_calls: list | None = field(default=None)
+
+        def gen():
+            yield FakeChunk(
+                tool_calls=[FakeToolCallDelta(index=0, id="call_1", tool_name="lookup", arguments='{"q":')],
+            )
+            yield FakeChunk(
+                tool_calls=[FakeToolCallDelta(index=0, arguments='"books"}')],
+            )
+            yield FakeChunk(
+                tool_calls=[FakeToolCallDelta(index=0, id="call_2", tool_name="weather", arguments='{"city":"Rome"}')],
+            )
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+        completed_event = next(data for name, data in parsed_events if name == "response.completed")
+        output = completed_event["response"]["output"]
+
+        assert len(output) == 2
+        assert output[0]["type"] == "function_call"
+        assert output[0]["call_id"] == "call_1"
+        assert output[0]["name"] == "lookup"
+        assert output[0]["arguments"] == '{"q":"books"}'
+        assert output[1]["type"] == "function_call"
+        assert output[1]["call_id"] == "call_2"
+        assert output[1]["name"] == "weather"
+        assert output[1]["arguments"] == '{"city":"Rome"}'
+
+    def test_async_streaming_tool_calls_chunk(self):
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class FakeToolCallDelta:
+            index: int
+            tool_name: str
+            arguments: str
+            id: str | None = None
+
+        @dataclass
+        class FakeChunk:
+            content: str = ""
+            tool_calls: list | None = field(default=None)
+
+        async def _run() -> list[str]:
+            async def gen() -> AsyncGenerator[FakeChunk, None]:
+                yield FakeChunk(
+                    tool_calls=[FakeToolCallDelta(index=0, id="call_1", tool_name="search", arguments='{"q":"test"}')],
+                )
+
+            resp = create_async_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+            return await _collect_events(resp)
+
+        events = asyncio.run(_run())
+        parsed_events = [_parse_sse_event(e) for e in events]
+        event_names = [name for name, _ in parsed_events]
+        assert "response.function_call_arguments.delta" in event_names
+        assert "response.function_call_arguments.done" in event_names
+
+        final_arguments = [
+            data["arguments"] for name, data in parsed_events if name == "response.function_call_arguments.done"
+        ]
+        assert final_arguments == ['{"q":"test"}']
+
+    def test_haystack_streaming_chunk_tool_calls(self):
+        """Real Haystack StreamingChunk + ToolCallDelta produces function_call events."""
+        from haystack.dataclasses import StreamingChunk
+        from haystack.dataclasses.streaming_chunk import ToolCallDelta
+
+        def gen():
+            yield StreamingChunk(
+                content="",
+                tool_calls=[
+                    ToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments=""),
+                ],
+                index=0,
+            )
+            yield StreamingChunk(
+                content="",
+                tool_calls=[
+                    ToolCallDelta(index=0, arguments='{"city": "Paris"}'),
+                ],
+                index=0,
+            )
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+
+        event_names = [name for name, _ in parsed_events]
+        assert "response.function_call_arguments.delta" in event_names
+        assert "response.function_call_arguments.done" in event_names
+        assert "response.output_item.done" in event_names
+
+        done_item = next(data for name, data in parsed_events if name == "response.output_item.done")
+        assert done_item["item"]["type"] == "function_call"
+        assert done_item["item"]["call_id"] == "call_1"
+        assert done_item["item"]["name"] == "get_weather"
+        assert done_item["item"]["arguments"] == '{"city": "Paris"}'
