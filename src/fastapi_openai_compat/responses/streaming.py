@@ -141,9 +141,7 @@ def create_reasoning_summary_part_added_event(
     )
 
 
-def create_reasoning_summary_text_delta_event(
-    item_id: str, output_index: int, summary_index: int, delta: str
-) -> str:
+def create_reasoning_summary_text_delta_event(item_id: str, output_index: int, summary_index: int, delta: str) -> str:
     return format_named_sse_event(
         "response.reasoning_summary_text.delta",
         {
@@ -156,9 +154,7 @@ def create_reasoning_summary_text_delta_event(
     )
 
 
-def create_reasoning_summary_text_done_event(
-    item_id: str, output_index: int, summary_index: int, text: str
-) -> str:
+def create_reasoning_summary_text_done_event(item_id: str, output_index: int, summary_index: int, text: str) -> str:
     return format_named_sse_event(
         "response.reasoning_summary_text.done",
         {
@@ -292,9 +288,7 @@ class _ResponseStreamState:
             item_id, init_events = self._ensure_reasoning_item()
             events.extend(init_events)
             self._reasoning_parts.append(reasoning_text)
-            events.append(
-                create_reasoning_summary_text_delta_event(item_id, self._output_index, 0, reasoning_text)
-            )
+            events.append(create_reasoning_summary_text_delta_event(item_id, self._output_index, 0, reasoning_text))
             return events
 
         fc_deltas = self._extract_function_call_deltas(chunk)
