@@ -4,6 +4,7 @@ from collections.abc import Generator
 import httpx
 import pytest
 from fastapi import FastAPI
+from haystack.dataclasses import ReasoningContent, StreamingChunk
 from httpx import ASGITransport
 from openai import AsyncOpenAI
 
@@ -21,7 +22,7 @@ class StatusEvent:
 
 def _build_app() -> FastAPI:
     def list_models() -> list[str]:
-        return ["echo-pipeline", "streaming-pipeline", "event-streaming-pipeline"]
+        return ["echo-pipeline", "streaming-pipeline", "event-streaming-pipeline", "reasoning-pipeline"]
 
     def run_completion(model: str, messages: list[dict], body: dict) -> CompletionResult:
         last = messages[-1]["content"] if messages else ""
@@ -41,6 +42,13 @@ def _build_app() -> FastAPI:
                 yield StatusEvent("Done", done=True)
 
             return _gen_events()
+        if model == "reasoning-pipeline":
+
+            def _gen_reasoning() -> Generator[StreamingChunk, None, None]:
+                yield StreamingChunk(content="", reasoning=ReasoningContent(reasoning_text="let me think"), index=0)
+                yield StreamingChunk(content="the answer", index=0)
+
+            return _gen_reasoning()
         return f"Echo: {last}"
 
     app = FastAPI()
@@ -219,4 +227,56 @@ async def test_openai_streaming_with_custom_events_still_works(openai_client):
             finish_reasons.append(chunk.choices[0].finish_reason)
 
     assert contents == ["foo ", "bar "]
+    assert "stop" in finish_reasons
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_reasoning_chunks_in_raw_sse(raw_http_client):
+    resp = await raw_http_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "reasoning-pipeline",
+            "messages": [{"role": "user", "content": "think"}],
+            "stream": True,
+        },
+    )
+    assert resp.status_code == 200
+
+    lines = resp.text.strip().split("\n")
+    data_lines = [line for line in lines if line.startswith("data: ")]
+    events = [json.loads(dl[len("data: ") :]) for dl in data_lines]
+
+    completion_chunks = [e for e in events if "choices" in e]
+    reasoning = completion_chunks[0]["choices"][0]["delta"]
+    assert reasoning["reasoning_content"] == "let me think"
+    assert reasoning["content"] is None
+
+    text = completion_chunks[1]["choices"][0]["delta"]
+    assert text["content"] == "the answer"
+    assert text["reasoning_content"] is None
+    await raw_http_client.aclose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_openai_sdk_streaming_with_reasoning_does_not_break(openai_client):
+    stream = await openai_client.chat.completions.create(
+        model="reasoning-pipeline",
+        messages=[{"role": "user", "content": "think"}],
+        stream=True,
+    )
+
+    contents = []
+    finish_reasons = []
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        if delta.content:
+            contents.append(delta.content)
+        if chunk.choices[0].finish_reason:
+            finish_reasons.append(chunk.choices[0].finish_reason)
+
+    assert contents == ["the answer"]
     assert "stop" in finish_reasons
