@@ -20,7 +20,7 @@ class StatusEvent:
         return {"type": "status", "data": {"description": self.description, "done": self.done}}
 
 
-def _build_app() -> FastAPI:
+def _build_app() -> FastAPI:  # noqa: C901
     def list_models() -> list[str]:
         return ["echo-pipeline", "streaming-pipeline", "event-streaming-pipeline", "reasoning-pipeline"]
 
