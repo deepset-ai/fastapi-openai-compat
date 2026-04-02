@@ -7,8 +7,8 @@
 FastAPI router factory for OpenAI-compatible Chat Completions, Responses, and Files upload endpoints.
 
 Provides configurable router factories for OpenAI-style APIs, with support for
-streaming (SSE), non-streaming responses, tool calling, configurable hooks,
-custom chunk mapping, and callback-driven file upload handling.
+streaming (SSE), non-streaming responses, tool calling, reasoning content,
+configurable hooks, custom chunk mapping, and callback-driven file upload handling.
 
 ## Table of contents
 
@@ -19,6 +19,7 @@ custom chunk mapping, and callback-driven file upload handling.
   - [The `run_completion` callable](#the-run_completion-callable)
   - [Response types](#response-types) -- [string](#returning-a-string) &#183; [generator](#streaming-with-a-generator) &#183; [ChatCompletion](#returning-a-chatcompletion)
   - [Tool calling](#tool-calling) -- [ChatCompletion](#returning-chatcompletion-directly) &#183; [StreamingChunk](#automatic-streamingchunk-support)
+  - [Reasoning content](#reasoning-content)
   - [Custom SSE events](#custom-sse-events)
   - [Hooks](#hooks) -- [transformer](#transformer-hooks) &#183; [observer](#observer-hooks)
   - [Custom chunk mapping](#custom-chunk-mapping)
@@ -27,6 +28,7 @@ custom chunk mapping, and callback-driven file upload handling.
   - [The `run_response` callable](#the-run_response-callable)
   - [Streaming text](#streaming-text)
   - [Streaming function calls](#streaming-function-calls)
+  - [Streaming reasoning](#streaming-reasoning)
   - [Returning a Response object](#returning-a-response-object)
   - [Combining with chat completions](#combining-with-chat-completions)
   - [Hooks](#hooks-1)
@@ -341,6 +343,51 @@ The library automatically:
 - Only auto-appends `finish_reason="stop"` if no chunk already carried a finish reason
 - Works via duck typing -- any object with `tool_calls` and `finish_reason` attributes is supported
 
+## Reasoning content
+
+When streaming, chunks with a `reasoning` attribute are emitted as
+`reasoning_content` on the message delta (the
+[DeepSeek convention](https://api-docs.deepseek.com/guides/reasoning_model),
+widely adopted by OpenAI-compatible clients). This is detected via duck
+typing -- any object with a `.reasoning` attribute works.
+
+With Haystack's `StreamingChunk` and `ReasoningContent`:
+
+```python
+from haystack.dataclasses import StreamingChunk
+from haystack.dataclasses.streaming_chunk import ReasoningContent
+
+def run_completion(model: str, messages: list[MessageParam], body: dict) -> CompletionResult:
+    def stream():
+        yield StreamingChunk(content="", reasoning=ReasoningContent(reasoning_text="Let me think..."))
+        yield StreamingChunk(content="", reasoning=ReasoningContent(reasoning_text=" The answer is 42."))
+        yield StreamingChunk(content="The answer is 42.")
+    return stream()
+```
+
+The resulting SSE stream contains chunks with `reasoning_content` on the delta
+for reasoning tokens, followed by regular `content` deltas for the visible
+answer:
+
+```json
+{"choices": [{"delta": {"reasoning_content": "Let me think...", "content": null}}]}
+{"choices": [{"delta": {"reasoning_content": " The answer is 42.", "content": null}}]}
+{"choices": [{"delta": {"content": "The answer is 42."}}]}
+```
+
+Any custom object works too -- the library checks for `chunk.reasoning` and
+extracts text via `.reasoning_text` (falling back to `str()`):
+
+```python
+class ReasoningChunk:
+    def __init__(self, reasoning_text: str):
+        self.reasoning = type("R", (), {"reasoning_text": reasoning_text})()
+
+def stream():
+    yield ReasoningChunk("Thinking step 1...")
+    yield "Final answer"
+```
+
 ## Custom SSE events
 
 You can yield custom SSE events alongside regular chat completion chunks. This is useful
@@ -539,6 +586,39 @@ def run_response(model: str, input_items: list[InputItem], body: dict) -> Respon
         yield FunctionCallChunk(call_id="call_1", name="get_weather", arguments='{"city":')
         yield FunctionCallChunk(call_id="call_1", name=None, arguments=' "Paris"}')
     return stream()
+```
+
+### Streaming reasoning
+
+Yield chunks with a `reasoning` attribute to stream reasoning output items.
+The library emits the proper OpenAI
+[reasoning summary events](https://platform.openai.com/docs/api-reference/responses-streaming)
+(`response.reasoning_summary_part.added`, `response.reasoning_summary_text.delta`,
+`response.reasoning_summary_text.done`, `response.reasoning_summary_part.done`)
+and produces a `type: "reasoning"` output item with a `summary` array in the
+completed response.
+
+```python
+from haystack.dataclasses import StreamingChunk
+from haystack.dataclasses.streaming_chunk import ReasoningContent
+
+def run_response(model: str, input_items: list[InputItem], body: dict) -> ResponseResult:
+    def stream():
+        yield StreamingChunk(content="", reasoning=ReasoningContent(reasoning_text="Step 1: "))
+        yield StreamingChunk(content="", reasoning=ReasoningContent(reasoning_text="analyze the input."))
+        yield StreamingChunk(content="Here is the answer.")
+    return stream()
+```
+
+The completed `Response` object includes the reasoning item before the message:
+
+```json
+{
+  "output": [
+    {"type": "reasoning", "summary": [{"type": "summary_text", "text": "Step 1: analyze the input."}]},
+    {"type": "message", "content": [{"type": "output_text", "text": "Here is the answer."}]}
+  ]
+}
 ```
 
 ### Returning a Response object

@@ -382,3 +382,49 @@ def test_can_use_dedicated_models_router_without_shadowing():
     assert alias_models.status_code == 200
     assert chat.status_code == 200
     assert resp.status_code == 200
+
+
+@pytest.mark.integration
+def test_streaming_reasoning_with_haystack_chunks():
+    from haystack.dataclasses import ReasoningContent, StreamingChunk
+
+    def run_response(_model, _input_items, body):
+        if body.get("stream"):
+
+            def _gen():
+                yield StreamingChunk(
+                    content="",
+                    reasoning=ReasoningContent(reasoning_text="analyzing..."),
+                    index=0,
+                )
+                yield StreamingChunk(content="the answer", index=0)
+
+            return _gen()
+        return "not-streamed"
+
+    app = _make_app(run_response)
+    with TestClient(app) as client:
+        resp = client.post("/v1/responses", json={"model": "test-model", "input": "think", "stream": True})
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    blocks = [block for block in resp.text.split("\n\n") if block.strip()]
+    event_names = [
+        line.removeprefix("event: ") for block in blocks for line in block.split("\n") if line.startswith("event: ")
+    ]
+    assert "response.reasoning_summary_text.delta" in event_names
+    assert "response.reasoning_summary_text.done" in event_names
+    assert "response.output_text.delta" in event_names
+    assert "response.completed" in event_names
+
+    import json
+
+    completed_block = next(b for b in blocks if "response.completed" in b)
+    data_line = next(line for line in completed_block.split("\n") if line.startswith("data: "))
+    completed = json.loads(data_line.removeprefix("data: "))
+    output = completed["response"]["output"]
+    assert len(output) == 2
+    assert output[0]["type"] == "reasoning"
+    assert output[0]["summary"][0]["text"] == "analyzing..."
+    assert output[1]["type"] == "message"
+    assert output[1]["content"][0]["text"] == "the answer"

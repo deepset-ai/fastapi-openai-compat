@@ -638,3 +638,127 @@ class TestResponseStreamingToolCalls:
         assert done_item["item"]["call_id"] == "call_1"
         assert done_item["item"]["name"] == "get_weather"
         assert done_item["item"]["arguments"] == '{"city": "Paris"}'
+
+
+@pytest.mark.unit
+class TestResponseStreamingReasoning:
+    def test_sync_streaming_reasoning_then_text(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeReasoning:
+            reasoning_text: str
+
+        @dataclass
+        class ReasoningChunk:
+            content: str = ""
+            reasoning: FakeReasoning | None = None
+
+        def gen():
+            yield ReasoningChunk(reasoning=FakeReasoning("step 1"))
+            yield ReasoningChunk(reasoning=FakeReasoning("step 2"))
+            yield "answer"
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+        event_names = [name for name, _ in parsed_events]
+
+        assert "response.output_item.added" in event_names
+        assert "response.reasoning_summary_part.added" in event_names
+        assert "response.reasoning_summary_text.delta" in event_names
+        assert "response.reasoning_summary_text.done" in event_names
+        assert "response.reasoning_summary_part.done" in event_names
+        assert "response.output_text.delta" in event_names
+        assert "response.completed" in event_names
+
+        deltas = [data["delta"] for name, data in parsed_events if name == "response.reasoning_summary_text.delta"]
+        assert deltas == ["step 1", "step 2"]
+
+        done_text = next(data for name, data in parsed_events if name == "response.reasoning_summary_text.done")
+        assert done_text["text"] == "step 1step 2"
+
+        completed = next(data for name, data in parsed_events if name == "response.completed")
+        output = completed["response"]["output"]
+        assert len(output) == 2
+        assert output[0]["type"] == "reasoning"
+        assert output[0]["summary"] == [{"type": "summary_text", "text": "step 1step 2"}]
+        assert output[1]["type"] == "message"
+
+    def test_async_streaming_reasoning_then_text(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeReasoning:
+            reasoning_text: str
+
+        @dataclass
+        class ReasoningChunk:
+            content: str = ""
+            reasoning: FakeReasoning | None = None
+
+        async def _run():
+            async def gen() -> AsyncGenerator:
+                yield ReasoningChunk(reasoning=FakeReasoning("thinking"))
+                yield "done"
+
+            resp = create_async_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+            return await _collect_events(resp)
+
+        events = asyncio.run(_run())
+        parsed_events = [_parse_sse_event(e) for e in events]
+
+        completed = next(data for name, data in parsed_events if name == "response.completed")
+        output = completed["response"]["output"]
+        assert len(output) == 2
+        assert output[0]["type"] == "reasoning"
+        assert output[0]["summary"][0]["text"] == "thinking"
+        assert output[1]["type"] == "message"
+
+    def test_sync_streaming_only_reasoning(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeReasoning:
+            reasoning_text: str
+
+        @dataclass
+        class ReasoningChunk:
+            content: str = ""
+            reasoning: FakeReasoning | None = None
+
+        def gen():
+            yield ReasoningChunk(reasoning=FakeReasoning("just thinking"))
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+
+        completed = next(data for name, data in parsed_events if name == "response.completed")
+        output = completed["response"]["output"]
+        assert len(output) == 1
+        assert output[0]["type"] == "reasoning"
+        assert output[0]["summary"][0]["text"] == "just thinking"
+
+    def test_haystack_streaming_chunk_reasoning(self):
+        from haystack.dataclasses import ReasoningContent, StreamingChunk
+
+        def gen():
+            yield StreamingChunk(
+                content="",
+                reasoning=ReasoningContent(reasoning_text="analyzing the problem"),
+                index=0,
+            )
+            yield StreamingChunk(content="here is the answer", index=0)
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+
+        completed = next(data for name, data in parsed_events if name == "response.completed")
+        output = completed["response"]["output"]
+        assert len(output) == 2
+        assert output[0]["type"] == "reasoning"
+        assert output[0]["summary"][0]["text"] == "analyzing the problem"
+        assert output[1]["type"] == "message"
+        assert output[1]["content"][0]["text"] == "here is the answer"

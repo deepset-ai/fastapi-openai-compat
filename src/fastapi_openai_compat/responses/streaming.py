@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 
-from fastapi_openai_compat._shared import ChunkMapper, _is_custom_event, default_chunk_mapper
+from fastapi_openai_compat._shared import ChunkMapper, _extract_reasoning_text, _is_custom_event, default_chunk_mapper
 from fastapi_openai_compat.responses.models import Response
 
 
@@ -123,6 +123,68 @@ def create_function_call_arguments_done_event(item_id: str, output_index: int, a
     )
 
 
+def create_reasoning_summary_part_added_event(
+    item_id: str,
+    output_index: int,
+    summary_index: int,
+    part: dict[str, Any],
+) -> str:
+    return format_named_sse_event(
+        "response.reasoning_summary_part.added",
+        {
+            "type": "response.reasoning_summary_part.added",
+            "item_id": item_id,
+            "output_index": output_index,
+            "summary_index": summary_index,
+            "part": part,
+        },
+    )
+
+
+def create_reasoning_summary_text_delta_event(item_id: str, output_index: int, summary_index: int, delta: str) -> str:
+    return format_named_sse_event(
+        "response.reasoning_summary_text.delta",
+        {
+            "type": "response.reasoning_summary_text.delta",
+            "item_id": item_id,
+            "output_index": output_index,
+            "summary_index": summary_index,
+            "delta": delta,
+        },
+    )
+
+
+def create_reasoning_summary_text_done_event(item_id: str, output_index: int, summary_index: int, text: str) -> str:
+    return format_named_sse_event(
+        "response.reasoning_summary_text.done",
+        {
+            "type": "response.reasoning_summary_text.done",
+            "item_id": item_id,
+            "output_index": output_index,
+            "summary_index": summary_index,
+            "text": text,
+        },
+    )
+
+
+def create_reasoning_summary_part_done_event(
+    item_id: str,
+    output_index: int,
+    summary_index: int,
+    part: dict[str, Any],
+) -> str:
+    return format_named_sse_event(
+        "response.reasoning_summary_part.done",
+        {
+            "type": "response.reasoning_summary_part.done",
+            "item_id": item_id,
+            "output_index": output_index,
+            "summary_index": summary_index,
+            "part": part,
+        },
+    )
+
+
 def create_content_part_done_event(
     item_id: str,
     output_index: int,
@@ -191,6 +253,8 @@ class _ResponseStreamState:
         self._content_index = 0
         self._text_item_id: str | None = None
         self._text_parts: list[str] = []
+        self._reasoning_item_id: str | None = None
+        self._reasoning_parts: list[str] = []
         self._fc_item_id: str | None = None
         self._fc_call_id: str | None = None
         self._fc_name: str | None = None
@@ -216,6 +280,17 @@ class _ResponseStreamState:
             event_name = event.get("type", "response.event")
             return [format_named_sse_event(event_name, event)]
 
+        reasoning_text = _extract_reasoning_text(chunk)
+        if reasoning_text is not None:
+            events: list[str] = []
+            events.extend(self._finalize_text())
+            events.extend(self._finalize_function_call())
+            item_id, init_events = self._ensure_reasoning_item()
+            events.extend(init_events)
+            self._reasoning_parts.append(reasoning_text)
+            events.append(create_reasoning_summary_text_delta_event(item_id, self._output_index, 0, reasoning_text))
+            return events
+
         fc_deltas = self._extract_function_call_deltas(chunk)
         if fc_deltas is not None:
             events: list[str] = []
@@ -228,6 +303,7 @@ class _ResponseStreamState:
             return []
 
         events: list[str] = []
+        events.extend(self._finalize_reasoning())
         events.extend(self._finalize_function_call())
         item_id, init_events = self._ensure_text_item()
         events.extend(init_events)
@@ -238,6 +314,7 @@ class _ResponseStreamState:
     def finalize(self) -> list[str]:
         """Close any open items and emit ``response.completed``."""
         events: list[str] = []
+        events.extend(self._finalize_reasoning())
         events.extend(self._finalize_text())
         events.extend(self._finalize_function_call())
         completed = Response(
@@ -299,6 +376,7 @@ class _ResponseStreamState:
 
     def _handle_function_call_delta(self, call_id: str, name: str | None, arguments: Any) -> list[str]:
         events: list[str] = []
+        events.extend(self._finalize_reasoning())
         events.extend(self._finalize_text())
 
         arguments_delta = "" if arguments is None else str(arguments)
@@ -314,6 +392,44 @@ class _ResponseStreamState:
         if arguments_delta:
             self._fc_arg_chunks.append(arguments_delta)
             events.append(create_function_call_arguments_delta_event(fc_item_id, self._output_index, arguments_delta))
+        return events
+
+    def _ensure_reasoning_item(self) -> tuple[str, list[str]]:
+        if self._reasoning_item_id is not None:
+            return self._reasoning_item_id, []
+        self._reasoning_item_id = f"rs_{uuid.uuid4().hex}"
+        in_progress_item = {
+            "id": self._reasoning_item_id,
+            "type": "reasoning",
+            "status": "in_progress",
+            "summary": [],
+        }
+        part_template = {"type": "summary_text", "text": ""}
+        return self._reasoning_item_id, [
+            create_output_item_added_event(self._output_index, in_progress_item),
+            create_reasoning_summary_part_added_event(self._reasoning_item_id, self._output_index, 0, part_template),
+        ]
+
+    def _finalize_reasoning(self) -> list[str]:
+        if self._reasoning_item_id is None:
+            return []
+        full_text = "".join(self._reasoning_parts)
+        final_part = {"type": "summary_text", "text": full_text}
+        final_item = {
+            "id": self._reasoning_item_id,
+            "type": "reasoning",
+            "status": "completed",
+            "summary": [final_part],
+        }
+        self._final_output.append(final_item)
+        events = [
+            create_reasoning_summary_text_done_event(self._reasoning_item_id, self._output_index, 0, full_text),
+            create_reasoning_summary_part_done_event(self._reasoning_item_id, self._output_index, 0, final_part),
+            create_output_item_done_event(self._output_index, final_item),
+        ]
+        self._reasoning_item_id = None
+        self._reasoning_parts = []
+        self._output_index += 1
         return events
 
     def _ensure_text_item(self) -> tuple[str, list[str]]:
@@ -454,6 +570,10 @@ __all__ = [
     "create_output_item_done_event",
     "create_output_text_delta_event",
     "create_output_text_done_event",
+    "create_reasoning_summary_part_added_event",
+    "create_reasoning_summary_part_done_event",
+    "create_reasoning_summary_text_delta_event",
+    "create_reasoning_summary_text_done_event",
     "create_response_completed_event",
     "create_response_created_event",
     "create_response_in_progress_event",

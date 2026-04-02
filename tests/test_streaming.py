@@ -424,3 +424,84 @@ class TestCustomEventAsyncStreaming:
         assert len(chunks) == 1
         payload = json.loads(chunks[0][len("data: ") :])
         assert "event" in payload
+
+
+@pytest.mark.unit
+class TestReasoningStreaming:
+    @pytest.mark.asyncio
+    async def test_sync_stream_with_reasoning_then_text(self):
+        @dataclass
+        class ReasoningChunk:
+            content: str = ""
+            reasoning: object = None
+
+        @dataclass
+        class FakeReasoning:
+            reasoning_text: str = ""
+
+        def gen():
+            yield ReasoningChunk(reasoning=FakeReasoning(reasoning_text="thinking..."))
+            yield StreamingChunk(content="answer")
+
+        response = create_sync_streaming_response(gen(), resp_id="r-reason", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        first = json.loads(chunks[0][len("data: ") :])
+        assert first["choices"][0]["delta"]["reasoning_content"] == "thinking..."
+        assert first["choices"][0]["delta"]["content"] is None
+
+        second = json.loads(chunks[1][len("data: ") :])
+        assert second["choices"][0]["delta"]["content"] == "answer"
+
+    @pytest.mark.asyncio
+    async def test_async_stream_with_reasoning(self):
+        @dataclass
+        class ReasoningChunk:
+            content: str = ""
+            reasoning: object = None
+
+        @dataclass
+        class FakeReasoning:
+            reasoning_text: str = ""
+
+        async def gen():
+            yield ReasoningChunk(reasoning=FakeReasoning(reasoning_text="step 1"))
+            yield ReasoningChunk(reasoning=FakeReasoning(reasoning_text="step 2"))
+            yield StreamingChunk(content="result")
+
+        response = create_async_streaming_response(gen(), resp_id="r-reason-a", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        r1 = json.loads(chunks[0][len("data: ") :])
+        assert r1["choices"][0]["delta"]["reasoning_content"] == "step 1"
+
+        r2 = json.loads(chunks[1][len("data: ") :])
+        assert r2["choices"][0]["delta"]["reasoning_content"] == "step 2"
+
+        text = json.loads(chunks[2][len("data: ") :])
+        assert text["choices"][0]["delta"]["content"] == "result"
+
+        stop = json.loads(chunks[3][len("data: ") :])
+        assert stop["choices"][0]["finish_reason"] == "stop"
+
+    @pytest.mark.asyncio
+    async def test_haystack_streaming_chunk_with_reasoning(self):
+        from haystack.dataclasses import ReasoningContent
+
+        def gen():
+            yield StreamingChunk(
+                content="",
+                reasoning=ReasoningContent(reasoning_text="let me think"),
+                index=0,
+            )
+            yield StreamingChunk(content="done", index=0)
+
+        response = create_sync_streaming_response(gen(), resp_id="r-hs-reason", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        first = json.loads(chunks[0][len("data: ") :])
+        assert first["choices"][0]["delta"]["reasoning_content"] == "let me think"
+        assert first["choices"][0]["delta"]["content"] is None
+
+        second = json.loads(chunks[1][len("data: ") :])
+        assert second["choices"][0]["delta"]["content"] == "done"

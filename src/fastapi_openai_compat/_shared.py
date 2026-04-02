@@ -36,4 +36,22 @@ def _is_custom_event(chunk: Any) -> bool:
     return callable(getattr(chunk, "to_event_dict", None))
 
 
+def _extract_reasoning_text(chunk: Any) -> str | None:
+    """
+    Extract reasoning text from a chunk via duck typing.
+
+    Supports Haystack ``ReasoningContent`` (with ``.reasoning_text``)
+    and falls back to ``str()`` for other reasoning-bearing objects.
+    Returns ``None`` when no reasoning is present or the text is empty.
+    """
+    reasoning = getattr(chunk, "reasoning", None)
+    if reasoning is None:
+        return None
+    text = getattr(reasoning, "reasoning_text", None)
+    if isinstance(text, str):
+        return text or None
+    result = str(reasoning)
+    return result or None
+
+
 __all__ = ["ChunkMapper", "OpenAIBaseModel", "PostHook", "PreHook", "default_chunk_mapper"]

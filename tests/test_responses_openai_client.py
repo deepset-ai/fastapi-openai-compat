@@ -305,3 +305,79 @@ def test_openai_responses_create_without_input_uses_previous_response_id():
             assert response.output[0].content[0].text == "items=0;previous=resp_prev_1"
 
     asyncio.run(_run())
+
+
+@pytest.mark.integration
+def test_openai_responses_streaming_reasoning_events():
+    from haystack.dataclasses import ReasoningContent, StreamingChunk
+
+    def run_response(_model, _input_items, body):
+        if body.get("stream"):
+
+            def _gen() -> Generator[StreamingChunk, None, None]:
+                yield StreamingChunk(content="", reasoning=ReasoningContent(reasoning_text="analyzing"), index=0)
+                yield StreamingChunk(content="result", index=0)
+
+            return _gen()
+        return "not-streamed"
+
+    async def _run() -> None:
+        async with _openai_client_for(run_response) as (client, _):
+            stream = await client.responses.create(model="test-model", input="think", stream=True)
+
+            event_types: list[str] = []
+            reasoning_deltas: list[str] = []
+            text_deltas: list[str] = []
+            async for event in stream:
+                event_types.append(event.type)
+                if event.type == "response.reasoning_summary_text.delta":
+                    reasoning_deltas.append(event.delta)
+                if event.type == "response.output_text.delta":
+                    text_deltas.append(event.delta)
+
+            assert "response.reasoning_summary_text.delta" in event_types
+            assert "response.reasoning_summary_text.done" in event_types
+            assert "response.reasoning_summary_part.added" in event_types
+            assert "response.reasoning_summary_part.done" in event_types
+            assert "response.output_text.delta" in event_types
+            assert "response.completed" in event_types
+            assert reasoning_deltas == ["analyzing"]
+            assert text_deltas == ["result"]
+
+    asyncio.run(_run())
+
+
+@pytest.mark.integration
+def test_openai_responses_non_streaming_reasoning_item():
+    def run_response(model, _input_items, _body):
+        return Response(
+            id="resp_reason",
+            created_at=int(time.time()),
+            model=model,
+            output=[
+                {
+                    "id": "rs_1",
+                    "type": "reasoning",
+                    "status": "completed",
+                    "summary": [{"type": "summary_text", "text": "thought process"}],
+                },
+                {
+                    "id": "msg_1",
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "answer", "annotations": []}],
+                },
+            ],
+        )
+
+    async def _run() -> None:
+        async with _openai_client_for(run_response) as (client, _):
+            response = await client.responses.create(model="test-model", input="think")
+            assert len(response.output) == 2
+            assert response.output[0].type == "reasoning"
+            assert response.output[0].summary[0].text == "thought process"
+            assert response.output[1].type == "message"
+            assert response.output[1].content[0].text == "answer"
+
+    asyncio.run(_run())

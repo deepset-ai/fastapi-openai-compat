@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 
-from fastapi_openai_compat._shared import ChunkMapper, _is_custom_event, default_chunk_mapper
+from fastapi_openai_compat._shared import ChunkMapper, _extract_reasoning_text, _is_custom_event, default_chunk_mapper
 from fastapi_openai_compat.chat_completions.models import ChatCompletion, Choice, Message
 
 
@@ -73,6 +73,23 @@ def _tool_call_delta_to_openai(tc: Any) -> dict[str, Any]:
     return result
 
 
+def _reasoning_chunk_to_sse(reasoning_text: str, resp_id: str, model_name: str) -> str:
+    """Build an SSE message with reasoning content on the delta."""
+    response = ChatCompletion(
+        id=resp_id,
+        object="chat.completion.chunk",
+        created=int(time.time()),
+        model=model_name,
+        choices=[
+            Choice(
+                index=0,
+                delta=Message(role="assistant", content=None, reasoning_content=reasoning_text),
+            )
+        ],
+    )
+    return f"data: {response.model_dump_json()}\n\n"
+
+
 def _tool_calls_chunk_to_sse(chunk: Any, resp_id: str, model_name: str) -> str:
     """Build an SSE message from a chunk carrying tool call deltas."""
     tool_calls_openai = [_tool_call_delta_to_openai(tc) for tc in chunk.tool_calls]
@@ -102,11 +119,13 @@ def create_sync_streaming_response(
     """
     Wrap a synchronous generator of chunks into an SSE StreamingResponse.
 
-    Handles four chunk types automatically:
+    Handles five chunk types automatically:
 
     * ``ChatCompletion`` objects are serialized directly.
     * Objects with a ``to_event_dict()`` method are serialized as custom SSE
       events (e.g. Open WebUI status/notification events).
+    * Chunks with a ``reasoning`` attribute (e.g. Haystack ``StreamingChunk``
+      with ``ReasoningContent``) emit ``reasoning_content`` on the delta.
     * Chunks with a ``tool_calls`` attribute (e.g. Haystack ``StreamingChunk``)
       are converted to OpenAI-format tool call deltas.
     * All other chunks are mapped to text via ``chunk_mapper``.
@@ -125,6 +144,9 @@ def create_sync_streaming_response(
                 yield _completion_to_sse(chunk)
             elif _is_custom_event(chunk):
                 yield event_to_sse_msg(chunk.to_event_dict())
+            elif (reasoning_text := _extract_reasoning_text(chunk)) is not None:
+                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name)
+                has_non_completion_chunks = True
             elif _has_tool_calls(chunk):
                 yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name)
                 has_non_completion_chunks = True
@@ -156,11 +178,13 @@ def create_async_streaming_response(
     """
     Wrap an asynchronous generator of chunks into an SSE StreamingResponse.
 
-    Handles four chunk types automatically:
+    Handles five chunk types automatically:
 
     * ``ChatCompletion`` objects are serialized directly.
     * Objects with a ``to_event_dict()`` method are serialized as custom SSE
       events (e.g. Open WebUI status/notification events).
+    * Chunks with a ``reasoning`` attribute (e.g. Haystack ``StreamingChunk``
+      with ``ReasoningContent``) emit ``reasoning_content`` on the delta.
     * Chunks with a ``tool_calls`` attribute (e.g. Haystack ``StreamingChunk``)
       are converted to OpenAI-format tool call deltas.
     * All other chunks are mapped to text via ``chunk_mapper``.
@@ -179,6 +203,9 @@ def create_async_streaming_response(
                 yield _completion_to_sse(chunk)
             elif _is_custom_event(chunk):
                 yield event_to_sse_msg(chunk.to_event_dict())
+            elif (reasoning_text := _extract_reasoning_text(chunk)) is not None:
+                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name)
+                has_non_completion_chunks = True
             elif _has_tool_calls(chunk):
                 yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name)
                 has_non_completion_chunks = True

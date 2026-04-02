@@ -1004,3 +1004,46 @@ def test_custom_events_standalone_app():
         assert events[2]["event"]["type"] == "notification"
         assert events[2]["event"]["data"]["message"] == "Finished"
         assert events[3]["choices"][0]["finish_reason"] == "stop"
+
+
+@pytest.mark.integration
+def test_streaming_reasoning_with_haystack_chunks():
+    from haystack.dataclasses import ReasoningContent, StreamingChunk
+
+    def _list() -> list[str]:
+        return ["reasoning-model"]
+
+    def _run(model: str, messages: list[dict], body: dict) -> CompletionResult:
+        def _gen():
+            yield StreamingChunk(
+                content="",
+                reasoning=ReasoningContent(reasoning_text="thinking step 1"),
+                index=0,
+            )
+            yield StreamingChunk(
+                content="",
+                reasoning=ReasoningContent(reasoning_text="thinking step 2"),
+                index=0,
+            )
+            yield StreamingChunk(content="final answer", index=0)
+
+        return _gen()
+
+    app = FastAPI()
+    router = create_openai_router(list_models=_list, run_completion=_run)
+    app.include_router(router)
+    with TestClient(app) as tc:
+        resp = tc.post(
+            "/v1/chat/completions",
+            json={"model": "reasoning-model", "messages": [{"role": "user", "content": "think"}], "stream": True},
+        )
+        assert resp.status_code == 200
+        lines = resp.text.strip().split("\n")
+        data_lines = [line for line in lines if line.startswith("data: ")]
+        events = [json.loads(dl[len("data: ") :]) for dl in data_lines]
+
+        assert events[0]["choices"][0]["delta"]["reasoning_content"] == "thinking step 1"
+        assert events[0]["choices"][0]["delta"]["content"] is None
+        assert events[1]["choices"][0]["delta"]["reasoning_content"] == "thinking step 2"
+        assert events[2]["choices"][0]["delta"]["content"] == "final answer"
+        assert events[3]["choices"][0]["finish_reason"] == "stop"
