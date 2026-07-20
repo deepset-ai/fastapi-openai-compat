@@ -5,11 +5,17 @@ import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from fastapi_openai_compat._async_utils import ensure_async
-from fastapi_openai_compat._shared import ChunkMapper, PostHook, PreHook, default_chunk_mapper
+from fastapi_openai_compat._shared import (
+    ChunkMapper,
+    PostHook,
+    PreHook,
+    callable_accepts_kwarg,
+    default_chunk_mapper,
+)
 from fastapi_openai_compat.chat_completions.models import ChatCompletion, ChatRequest
 from fastapi_openai_compat.chat_completions.streaming import (
     chat_completion_response,
@@ -85,6 +91,9 @@ def create_chat_completion_router(  # noqa: PLR0913, C901
         A configured ``APIRouter`` ready to be included in a FastAPI app.
     """
     _run_completion = ensure_async(run_completion)
+    # Only forward request headers to callbacks that opt in (accept a `headers` kwarg or **kwargs),
+    # so existing `run_completion(model, messages, body)` callbacks keep working unchanged.
+    _forward_headers = callable_accepts_kwarg(run_completion, "headers")
     _pre_hook = ensure_async(pre_hook) if pre_hook else _default_pre_hook
     _post_hook = ensure_async(post_hook) if post_hook else _default_post_hook
     _chunk_mapper = chunk_mapper
@@ -137,16 +146,18 @@ def create_chat_completion_router(  # noqa: PLR0913, C901
 
     @router.post("/v1/chat/completions", **chat_params, operation_id="openai_chat_completions")
     @router.post("/chat/completions", **chat_params, operation_id="openai_chat_completions_alias")
-    async def chat_endpoint(chat_req: ChatRequest) -> ChatCompletion | StreamingResponse:
+    async def chat_endpoint(chat_req: ChatRequest, http_request: Request) -> ChatCompletion | StreamingResponse:
         try:
             pre_result = await _pre_hook(chat_req)
             if pre_result is not None:
                 chat_req = pre_result
 
+            extra = {"headers": dict(http_request.headers)} if _forward_headers else {}
             result: CompletionResult = await _run_completion(
                 chat_req.model,
                 chat_req.messages,
                 chat_req.model_dump(),
+                **extra,
             )
 
             post_result = await _post_hook(result)

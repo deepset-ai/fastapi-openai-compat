@@ -1,5 +1,6 @@
 """Shared types and helpers used across router modules."""
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 
@@ -31,6 +32,21 @@ def default_chunk_mapper(chunk: Any) -> str:
     return str(chunk)
 
 
+def callable_accepts_kwarg(fn: Callable[..., Any], name: str) -> bool:
+    """Return True if `fn` accepts keyword argument `name` (explicitly or via ``**kwargs``).
+
+    Used to forward optional inputs (e.g. the request `headers`) only to callbacks that opt in, so
+    existing callbacks with the old signature keep working unchanged.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if name in params:
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 def _is_custom_event(chunk: Any) -> bool:
     """Check if a chunk is a custom SSE event via duck typing (.to_event_dict())."""
     return callable(getattr(chunk, "to_event_dict", None))
@@ -54,4 +70,11 @@ def _extract_reasoning_text(chunk: Any) -> str | None:
     return result or None
 
 
-__all__ = ["ChunkMapper", "OpenAIBaseModel", "PostHook", "PreHook", "default_chunk_mapper"]
+__all__ = [
+    "ChunkMapper",
+    "OpenAIBaseModel",
+    "PostHook",
+    "PreHook",
+    "callable_accepts_kwarg",
+    "default_chunk_mapper",
+]

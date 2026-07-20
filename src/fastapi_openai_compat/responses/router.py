@@ -5,11 +5,17 @@ import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from fastapi_openai_compat._async_utils import ensure_async
-from fastapi_openai_compat._shared import ChunkMapper, PostHook, PreHook, default_chunk_mapper
+from fastapi_openai_compat._shared import (
+    ChunkMapper,
+    PostHook,
+    PreHook,
+    callable_accepts_kwarg,
+    default_chunk_mapper,
+)
 from fastapi_openai_compat.models_router import ListModelsFn, create_models_router
 from fastapi_openai_compat.responses.models import InputItem, Response, ResponseRequest
 from fastapi_openai_compat.responses.streaming import (
@@ -88,6 +94,8 @@ def create_responses_router(  # noqa: PLR0913, C901
             a chat-completions router in the same app.
     """
     _run_response = ensure_async(run_response)
+    # Forward request headers only to callbacks that opt in (accept `headers` or **kwargs).
+    _forward_headers = callable_accepts_kwarg(run_response, "headers")
     _pre_hook = ensure_async(pre_hook) if pre_hook else _default_pre_hook
     _post_hook = ensure_async(post_hook) if post_hook else _default_post_hook
     _chunk_mapper = chunk_mapper
@@ -117,17 +125,19 @@ def create_responses_router(  # noqa: PLR0913, C901
 
     @router.post("/v1/responses", **responses_params, operation_id="openai_responses")
     @router.post("/responses", **responses_params, operation_id="openai_responses_alias")
-    async def responses_endpoint(response_req: ResponseRequest) -> Response | StreamingResponse:
+    async def responses_endpoint(response_req: ResponseRequest, http_request: Request) -> Response | StreamingResponse:
         try:
             pre_result = await _pre_hook(response_req)
             if pre_result is not None:
                 response_req = pre_result
 
             input_items = _normalize_input(response_req.input)
+            extra = {"headers": dict(http_request.headers)} if _forward_headers else {}
             result: ResponseResult = await _run_response(
                 response_req.model,
                 input_items,
                 response_req.model_dump(),
+                **extra,
             )
 
             post_result = await _post_hook(result)
