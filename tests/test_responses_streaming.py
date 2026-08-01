@@ -11,6 +11,7 @@ from fastapi_openai_compat.responses.streaming import (
     create_output_text_delta_event,
     create_response_completed_event,
     create_response_created_event,
+    create_response_failed_event,
     create_responses_streaming_response,
     format_named_sse_event,
     response_from_text,
@@ -80,6 +81,23 @@ class TestResponseEventHelpers:
         assert payload["type"] == "response.completed"
         assert payload["response"]["id"] == "resp_1"
 
+    def test_create_response_failed_event(self):
+        resp = Response(
+            id="resp_1",
+            created_at=1000,
+            model="m",
+            status="failed",
+            output=[],
+            error={"message": "boom", "type": "RuntimeError"},
+        )
+        event = create_response_failed_event(resp)
+        assert "event: response.failed" in event
+        data_line = event.split("\n")[1]
+        payload = json.loads(data_line.removeprefix("data: "))
+        assert payload["type"] == "response.failed"
+        assert payload["response"]["status"] == "failed"
+        assert payload["response"]["error"] == {"message": "boom", "type": "RuntimeError"}
+
 
 @pytest.mark.unit
 class TestResponseStreaming:
@@ -132,6 +150,52 @@ class TestResponseStreaming:
         assert "response.created" in event_names
         assert "response.output_text.delta" in event_names
         assert "response.completed" in event_names
+
+    def test_sync_streaming_mid_stream_exception_emits_response_failed(self):
+        def gen():
+            yield "Hello "
+            yield "world"
+            msg = "boom"
+            raise RuntimeError(msg)
+
+        resp = create_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+        events = asyncio.run(_collect_events(resp))
+        parsed_events = [_parse_sse_event(e) for e in events]
+        event_names = [name for name, _ in parsed_events]
+
+        # Text already streamed before the failure is closed out normally...
+        assert "response.output_text.delta" in event_names
+        assert "response.output_text.done" in event_names
+        # ...then the stream ends with response.failed, not response.completed.
+        assert event_names[-1] == "response.failed"
+        assert "response.completed" not in event_names
+
+        failed_response = parsed_events[-1][1]["response"]
+        assert failed_response["status"] == "failed"
+        assert failed_response["error"]["message"] == "boom"
+        assert failed_response["error"]["type"] == "RuntimeError"
+        assert failed_response["output"][0]["content"][0]["text"] == "Hello world"
+
+    def test_async_streaming_mid_stream_exception_emits_response_failed(self):
+        async def _run() -> list[str]:
+            async def gen() -> AsyncGenerator[str, None]:
+                yield "Hello "
+                yield "world"
+                msg = "boom"
+                raise RuntimeError(msg)
+
+            resp = create_async_responses_streaming_response(gen(), "resp_1", "m", default_chunk_mapper)
+            return await _collect_events(resp)
+
+        events = asyncio.run(_run())
+        parsed_events = [_parse_sse_event(e) for e in events]
+        event_names = [name for name, _ in parsed_events]
+
+        assert event_names[-1] == "response.failed"
+        assert "response.completed" not in event_names
+        failed_response = parsed_events[-1][1]["response"]
+        assert failed_response["status"] == "failed"
+        assert failed_response["error"]["message"] == "boom"
 
     def test_sync_streaming_function_call_chunk(self):
         class FunctionCallChunk:

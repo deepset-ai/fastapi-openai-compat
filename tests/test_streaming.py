@@ -93,6 +93,29 @@ class TestCreateSyncStreamingResponse:
         first = json.loads(chunks[0][len("data: ") :])
         assert first["choices"][0]["delta"]["content"] == "one"
 
+    @pytest.mark.asyncio
+    async def test_mid_stream_exception_emits_error_event_instead_of_truncating(self):
+        def gen() -> Generator[str, None, None]:
+            yield "hello "
+            yield "world"
+            msg = "boom"
+            raise RuntimeError(msg)
+
+        response = create_sync_streaming_response(gen(), resp_id="r-5", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        # Both chunks emitted before the failure must still reach the client.
+        assert len(chunks) == 3
+        first = json.loads(chunks[0][len("data: ") :])
+        assert first["choices"][0]["delta"]["content"] == "hello "
+        second = json.loads(chunks[1][len("data: ") :])
+        assert second["choices"][0]["delta"]["content"] == "world"
+
+        # The stream ends with a visible error, not a plain "stop" or silent EOF.
+        last = json.loads(chunks[-1][len("data: ") :])
+        assert last["event"]["error"]["message"] == "boom"
+        assert last["event"]["error"]["type"] == "RuntimeError"
+
 
 @pytest.mark.unit
 class TestCreateAsyncStreamingResponse:
@@ -125,6 +148,27 @@ class TestCreateAsyncStreamingResponse:
         assert len(chunks) == 3
         first = json.loads(chunks[0][len("data: ") :])
         assert first["choices"][0]["delta"]["content"] == "alpha"
+
+    @pytest.mark.asyncio
+    async def test_mid_stream_exception_emits_error_event_instead_of_truncating(self):
+        async def gen() -> AsyncGenerator[str, None]:
+            yield "hello "
+            yield "world"
+            msg = "boom"
+            raise RuntimeError(msg)
+
+        response = create_async_streaming_response(gen(), resp_id="r-6", model_name="m")
+        chunks = [chunk async for chunk in response.body_iterator]
+
+        assert len(chunks) == 3
+        first = json.loads(chunks[0][len("data: ") :])
+        assert first["choices"][0]["delta"]["content"] == "hello "
+        second = json.loads(chunks[1][len("data: ") :])
+        assert second["choices"][0]["delta"]["content"] == "world"
+
+        last = json.loads(chunks[-1][len("data: ") :])
+        assert last["event"]["error"]["message"] == "boom"
+        assert last["event"]["error"]["type"] == "RuntimeError"
 
 
 @pytest.mark.unit
