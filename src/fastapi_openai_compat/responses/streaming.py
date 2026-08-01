@@ -1,6 +1,7 @@
 """Responses API streaming helpers."""
 
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator, Generator
@@ -10,6 +11,8 @@ from fastapi.responses import StreamingResponse
 
 from fastapi_openai_compat._shared import ChunkMapper, _extract_reasoning_text, _is_custom_event, default_chunk_mapper
 from fastapi_openai_compat.responses.models import Response
+
+logger = logging.getLogger("fastapi_openai_compat.responses")
 
 
 def format_named_sse_event(event_name: str, data_dict: dict[str, Any]) -> str:
@@ -221,6 +224,13 @@ def create_response_completed_event(response: Response) -> str:
     )
 
 
+def create_response_failed_event(response: Response) -> str:
+    return format_named_sse_event(
+        "response.failed",
+        {"type": "response.failed", "response": response.model_dump()},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Streaming state machine
 # ---------------------------------------------------------------------------
@@ -326,6 +336,25 @@ class _ResponseStreamState:
             output=self._final_output,
         )
         events.append(create_response_completed_event(completed))
+        return events
+
+    def fail(self, exc: Exception) -> list[str]:
+        """Close any open items and emit ``response.failed`` after a mid-stream error."""
+        events: list[str] = []
+        events.extend(self._finalize_reasoning())
+        events.extend(self._finalize_text())
+        events.extend(self._finalize_function_call())
+        failed = Response(
+            id=self._resp_id,
+            object="response",
+            created_at=self._response.created_at,
+            status="failed",
+            model=self._model_name,
+            output=self._final_output,
+            error={"message": str(exc), "type": type(exc).__name__},
+        )
+        events.append(create_response_failed_event(failed))
+        self.done = True
         return events
 
     # -- private helpers ----------------------------------------------------
@@ -530,10 +559,15 @@ def create_responses_streaming_response(
     def stream_events() -> Generator[str, None, None]:
         state = _ResponseStreamState(resp_id, model_name, chunk_mapper)
         yield from state.start()
-        for chunk in result:
-            yield from state.process_chunk(chunk)
-            if state.done:
-                return
+        try:
+            for chunk in result:
+                yield from state.process_chunk(chunk)
+                if state.done:
+                    return
+        except Exception as exc:
+            logger.exception("Error while streaming response")
+            yield from state.fail(exc)
+            return
         yield from state.finalize()
 
     return StreamingResponse(stream_events(), media_type="text/event-stream")
@@ -551,11 +585,17 @@ def create_async_responses_streaming_response(
         state = _ResponseStreamState(resp_id, model_name, chunk_mapper)
         for event in state.start():
             yield event
-        async for chunk in result:
-            for event in state.process_chunk(chunk):
+        try:
+            async for chunk in result:
+                for event in state.process_chunk(chunk):
+                    yield event
+                if state.done:
+                    return
+        except Exception as exc:
+            logger.exception("Error while streaming response")
+            for event in state.fail(exc):
                 yield event
-            if state.done:
-                return
+            return
         for event in state.finalize():
             yield event
 
@@ -576,6 +616,7 @@ __all__ = [
     "create_reasoning_summary_text_done_event",
     "create_response_completed_event",
     "create_response_created_event",
+    "create_response_failed_event",
     "create_response_in_progress_event",
     "create_responses_streaming_response",
     "format_named_sse_event",
