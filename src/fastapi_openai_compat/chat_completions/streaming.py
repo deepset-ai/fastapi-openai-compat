@@ -26,6 +26,7 @@ def create_sse_data_msg(
     model_name: str,
     chunk_content: str = "",
     finish_reason: str | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> str:
     """Format a single chat completion chunk as an SSE data message."""
     response = ChatCompletion(
@@ -34,6 +35,7 @@ def create_sse_data_msg(
         created=int(time.time()),
         model=model_name,
         choices=[Choice(index=0, delta=Message(role="assistant", content=chunk_content), finish_reason=finish_reason)],
+        usage=usage,
     )
     return f"data: {response.model_dump_json()}\n\n"
 
@@ -52,6 +54,16 @@ def _has_tool_calls(chunk: Any) -> bool:
 def _get_finish_reason(chunk: Any) -> str | None:
     """Extract finish_reason from a chunk via duck typing."""
     return getattr(chunk, "finish_reason", None)
+
+
+def _get_usage(chunk: Any) -> dict[str, Any] | None:
+    """Extract usage information from a chunk via duck typing."""
+    if usage := getattr(chunk, "usage", None):
+        return usage
+    if meta := getattr(chunk, "meta", {}):
+        if isinstance(meta, dict) and (usage := meta.get("usage")):
+            return usage
+    return None
 
 
 def _tool_call_delta_to_openai(tc: Any) -> dict[str, Any]:
@@ -73,7 +85,12 @@ def _tool_call_delta_to_openai(tc: Any) -> dict[str, Any]:
     return result
 
 
-def _reasoning_chunk_to_sse(reasoning_text: str, resp_id: str, model_name: str) -> str:
+def _reasoning_chunk_to_sse(
+    reasoning_text: str,
+    resp_id: str,
+    model_name: str,
+    usage: dict[str, Any] | None = None,
+) -> str:
     """Build an SSE message with reasoning content on the delta."""
     response = ChatCompletion(
         id=resp_id,
@@ -86,11 +103,12 @@ def _reasoning_chunk_to_sse(reasoning_text: str, resp_id: str, model_name: str) 
                 delta=Message(role="assistant", content=None, reasoning_content=reasoning_text),
             )
         ],
+        usage=usage,
     )
     return f"data: {response.model_dump_json()}\n\n"
 
 
-def _tool_calls_chunk_to_sse(chunk: Any, resp_id: str, model_name: str) -> str:
+def _tool_calls_chunk_to_sse(chunk: Any, resp_id: str, model_name: str, usage: dict[str, Any] | None = None) -> str:
     """Build an SSE message from a chunk carrying tool call deltas."""
     tool_calls_openai = [_tool_call_delta_to_openai(tc) for tc in chunk.tool_calls]
     finish_reason = _get_finish_reason(chunk)
@@ -106,6 +124,7 @@ def _tool_calls_chunk_to_sse(chunk: Any, resp_id: str, model_name: str) -> str:
                 finish_reason=finish_reason,
             )
         ],
+        usage=usage,
     )
     return f"data: {response.model_dump_json()}\n\n"
 
@@ -140,15 +159,16 @@ def create_sync_streaming_response(
         has_non_completion_chunks = False
         has_explicit_finish = False
         for chunk in result:
+            usage = _get_usage(chunk)
             if isinstance(chunk, ChatCompletion):
                 yield _completion_to_sse(chunk)
             elif _is_custom_event(chunk):
                 yield event_to_sse_msg(chunk.to_event_dict())
             elif (reasoning_text := _extract_reasoning_text(chunk)) is not None:
-                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name)
+                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name, usage)
                 has_non_completion_chunks = True
             elif _has_tool_calls(chunk):
-                yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name)
+                yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name, usage)
                 has_non_completion_chunks = True
                 if _get_finish_reason(chunk) is not None:
                     has_explicit_finish = True
@@ -159,6 +179,7 @@ def create_sync_streaming_response(
                     model_name=model_name,
                     chunk_content=chunk_mapper(chunk),
                     finish_reason=finish_reason,
+                    usage=usage,
                 )
                 has_non_completion_chunks = True
                 if finish_reason is not None:
@@ -199,15 +220,16 @@ def create_async_streaming_response(
         has_non_completion_chunks = False
         has_explicit_finish = False
         async for chunk in result:
+            usage = _get_usage(chunk)
             if isinstance(chunk, ChatCompletion):
                 yield _completion_to_sse(chunk)
             elif _is_custom_event(chunk):
                 yield event_to_sse_msg(chunk.to_event_dict())
             elif (reasoning_text := _extract_reasoning_text(chunk)) is not None:
-                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name)
+                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name, usage=usage)
                 has_non_completion_chunks = True
             elif _has_tool_calls(chunk):
-                yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name)
+                yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name, usage=usage)
                 has_non_completion_chunks = True
                 if _get_finish_reason(chunk) is not None:
                     has_explicit_finish = True
@@ -218,6 +240,7 @@ def create_async_streaming_response(
                     model_name=model_name,
                     chunk_content=chunk_mapper(chunk),
                     finish_reason=finish_reason,
+                    usage=usage
                 )
                 has_non_completion_chunks = True
                 if finish_reason is not None:
@@ -228,7 +251,7 @@ def create_async_streaming_response(
     return StreamingResponse(stream_chunks_async(), media_type="text/event-stream")
 
 
-def chat_completion_response(result: str, resp_id: str, model_name: str) -> ChatCompletion:
+def chat_completion_response(result: str, resp_id: str, model_name: str, usage: dict[str, Any] | None = None) -> ChatCompletion:
     """Create a non-streaming chat completion response from a plain string result."""
     return ChatCompletion(
         id=resp_id,
@@ -236,6 +259,7 @@ def chat_completion_response(result: str, resp_id: str, model_name: str) -> Chat
         created=int(time.time()),
         model=model_name,
         choices=[Choice(index=0, message=Message(role="assistant", content=result), finish_reason="stop")],
+        usage=usage,
     )
 
 
