@@ -58,8 +58,12 @@ def _get_finish_reason(chunk: Any) -> str | None:
 
 def _get_usage(chunk: Any) -> dict[str, Any] | None:
     """Extract usage information from a chunk via duck typing."""
-    meta = getattr(chunk, "meta", {})
-    return meta.get("usage")
+    if usage := getattr(chunk, "usage", None):
+        return usage
+    if meta := getattr(chunk, "meta", {}):
+        if isinstance(meta, dict) and (usage := meta.get("usage")):
+            return usage
+    return None
 
 
 def _tool_call_delta_to_openai(tc: Any) -> dict[str, Any]:
