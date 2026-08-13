@@ -33,7 +33,8 @@ def default_chunk_mapper(chunk: Any) -> str:
 
 
 def callable_accepts_kwarg(fn: Callable[..., Any], name: str) -> bool:
-    """Return True if `fn` accepts keyword argument `name` (explicitly or via ``**kwargs``).
+    """
+    Return True if `fn` accepts keyword argument `name` (explicitly or via ``**kwargs``).
 
     Used to forward optional inputs (e.g. the request `headers`) only to callbacks that opt in, so
     existing callbacks with the old signature keep working unchanged.

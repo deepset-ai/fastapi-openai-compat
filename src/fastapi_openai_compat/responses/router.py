@@ -9,13 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from fastapi_openai_compat._async_utils import ensure_async
-from fastapi_openai_compat._shared import (
-    ChunkMapper,
-    PostHook,
-    PreHook,
-    callable_accepts_kwarg,
-    default_chunk_mapper,
-)
+from fastapi_openai_compat._shared import ChunkMapper, PostHook, PreHook, callable_accepts_kwarg, default_chunk_mapper
 from fastapi_openai_compat.models_router import ListModelsFn, create_models_router
 from fastapi_openai_compat.responses.models import InputItem, Response, ResponseRequest
 from fastapi_openai_compat.responses.streaming import (
@@ -73,6 +67,11 @@ def create_responses_router(  # noqa: PLR0913, C901
       empty list when ``input`` is omitted).
     - ``body`` is the full request body dictionary, including extra
       parameters.
+
+    Declaring an additional ``headers`` parameter (or ``**kwargs``) on ``run_response`` also gets the
+    incoming request headers as a ``dict[str, str]`` with lower-cased keys. They are only passed to
+    callables that opt in this way, so existing ``(model, input_items, body)`` callables are
+    unaffected.
 
     Args:
         list_models: Callable returning a list of available model names.
