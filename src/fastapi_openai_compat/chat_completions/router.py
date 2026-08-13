@@ -9,13 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from fastapi_openai_compat._async_utils import ensure_async
-from fastapi_openai_compat._shared import (
-    ChunkMapper,
-    PostHook,
-    PreHook,
-    callable_accepts_kwarg,
-    default_chunk_mapper,
-)
+from fastapi_openai_compat._shared import ChunkMapper, PostHook, PreHook, callable_accepts_kwarg, default_chunk_mapper
 from fastapi_openai_compat.chat_completions.models import ChatCompletion, ChatRequest
 from fastapi_openai_compat.chat_completions.streaming import (
     chat_completion_response,
@@ -69,6 +63,11 @@ def create_chat_completion_router(  # noqa: PLR0913, C901
             - ``Generator`` / ``AsyncGenerator`` -- streamed as SSE.
               Yields of ``ChatCompletion`` are serialized directly;
               other yields go through ``chunk_mapper``.
+
+            Declare an additional ``headers`` parameter (or ``**kwargs``) to also receive the
+            incoming request headers as a ``dict[str, str]`` with lower-cased keys. They are only
+            passed to callables that opt in this way, so existing ``(model, messages, body)``
+            callables are unaffected.
         pre_hook: Optional callable invoked **before** ``run_completion``.
             Receives the parsed ``ChatRequest`` and may return a modified
             ``ChatRequest`` (transformer) or ``None`` (observer).
