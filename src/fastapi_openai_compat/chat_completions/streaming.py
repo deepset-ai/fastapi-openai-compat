@@ -26,12 +26,13 @@ def create_sse_data_msg(
     model_name: str,
     chunk_content: str = "",
     finish_reason: str | None = None,
+    created: int | None = None,
 ) -> str:
     """Format a single chat completion chunk as an SSE data message."""
     response = ChatCompletion(
         id=resp_id,
         object="chat.completion.chunk",
-        created=int(time.time()),
+        created=created if created is not None else int(time.time()),
         model=model_name,
         choices=[Choice(index=0, delta=Message(role="assistant", content=chunk_content), finish_reason=finish_reason)],
     )
@@ -73,12 +74,12 @@ def _tool_call_delta_to_openai(tc: Any) -> dict[str, Any]:
     return result
 
 
-def _reasoning_chunk_to_sse(reasoning_text: str, resp_id: str, model_name: str) -> str:
+def _reasoning_chunk_to_sse(reasoning_text: str, resp_id: str, model_name: str, created: int | None = None) -> str:
     """Build an SSE message with reasoning content on the delta."""
     response = ChatCompletion(
         id=resp_id,
         object="chat.completion.chunk",
-        created=int(time.time()),
+        created=created if created is not None else int(time.time()),
         model=model_name,
         choices=[
             Choice(
@@ -90,14 +91,14 @@ def _reasoning_chunk_to_sse(reasoning_text: str, resp_id: str, model_name: str) 
     return f"data: {response.model_dump_json()}\n\n"
 
 
-def _tool_calls_chunk_to_sse(chunk: Any, resp_id: str, model_name: str) -> str:
+def _tool_calls_chunk_to_sse(chunk: Any, resp_id: str, model_name: str, created: int | None = None) -> str:
     """Build an SSE message from a chunk carrying tool call deltas."""
     tool_calls_openai = [_tool_call_delta_to_openai(tc) for tc in chunk.tool_calls]
     finish_reason = _get_finish_reason(chunk)
     response = ChatCompletion(
         id=resp_id,
         object="chat.completion.chunk",
-        created=int(time.time()),
+        created=created if created is not None else int(time.time()),
         model=model_name,
         choices=[
             Choice(
@@ -137,6 +138,7 @@ def create_sync_streaming_response(
     """
 
     def stream_chunks() -> Generator[str, None, None]:
+        created = int(time.time())
         has_non_completion_chunks = False
         has_explicit_finish = False
         for chunk in result:
@@ -145,10 +147,10 @@ def create_sync_streaming_response(
             elif _is_custom_event(chunk):
                 yield event_to_sse_msg(chunk.to_event_dict())
             elif (reasoning_text := _extract_reasoning_text(chunk)) is not None:
-                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name)
+                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name, created=created)
                 has_non_completion_chunks = True
             elif _has_tool_calls(chunk):
-                yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name)
+                yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name, created=created)
                 has_non_completion_chunks = True
                 if _get_finish_reason(chunk) is not None:
                     has_explicit_finish = True
@@ -159,12 +161,13 @@ def create_sync_streaming_response(
                     model_name=model_name,
                     chunk_content=chunk_mapper(chunk),
                     finish_reason=finish_reason,
+                    created=created,
                 )
                 has_non_completion_chunks = True
                 if finish_reason is not None:
                     has_explicit_finish = True
         if has_non_completion_chunks and not has_explicit_finish:
-            yield create_sse_data_msg(resp_id=resp_id, model_name=model_name, finish_reason="stop")
+            yield create_sse_data_msg(resp_id=resp_id, model_name=model_name, finish_reason="stop", created=created)
 
     return StreamingResponse(stream_chunks(), media_type="text/event-stream")
 
@@ -196,6 +199,7 @@ def create_async_streaming_response(
     """
 
     async def stream_chunks_async() -> AsyncGenerator[str, None]:
+        created = int(time.time())
         has_non_completion_chunks = False
         has_explicit_finish = False
         async for chunk in result:
@@ -204,10 +208,10 @@ def create_async_streaming_response(
             elif _is_custom_event(chunk):
                 yield event_to_sse_msg(chunk.to_event_dict())
             elif (reasoning_text := _extract_reasoning_text(chunk)) is not None:
-                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name)
+                yield _reasoning_chunk_to_sse(reasoning_text, resp_id, model_name, created=created)
                 has_non_completion_chunks = True
             elif _has_tool_calls(chunk):
-                yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name)
+                yield _tool_calls_chunk_to_sse(chunk, resp_id, model_name, created=created)
                 has_non_completion_chunks = True
                 if _get_finish_reason(chunk) is not None:
                     has_explicit_finish = True
@@ -218,12 +222,13 @@ def create_async_streaming_response(
                     model_name=model_name,
                     chunk_content=chunk_mapper(chunk),
                     finish_reason=finish_reason,
+                    created=created,
                 )
                 has_non_completion_chunks = True
                 if finish_reason is not None:
                     has_explicit_finish = True
         if has_non_completion_chunks and not has_explicit_finish:
-            yield create_sse_data_msg(resp_id=resp_id, model_name=model_name, finish_reason="stop")
+            yield create_sse_data_msg(resp_id=resp_id, model_name=model_name, finish_reason="stop", created=created)
 
     return StreamingResponse(stream_chunks_async(), media_type="text/event-stream")
 
