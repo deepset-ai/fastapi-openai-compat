@@ -3,6 +3,17 @@ import warnings
 import pytest
 
 
+def _iter_route_paths(router) -> list[tuple[str, tuple[str, ...]]]:
+    """Flatten paths/methods across FastAPI ``_IncludedRouter`` wrappers (FastAPI ≥0.138)."""
+    result: list[tuple[str, tuple[str, ...]]] = []
+    for route in router.routes:
+        if hasattr(route, "effective_route_contexts"):
+            result.extend((ctx.path, tuple(sorted(ctx.methods or []))) for ctx in route.effective_route_contexts())
+        else:
+            result.append((route.path, tuple(sorted(route.methods or []))))
+    return sorted(result)
+
+
 @pytest.mark.unit
 def test_chat_router_exports_and_alias_behavior():
     from fastapi_openai_compat import create_chat_completion_router, create_openai_router
@@ -26,9 +37,7 @@ def test_chat_router_exports_and_alias_behavior():
         run_completion=_run_completion,
     )
 
-    new_paths = sorted((route.path, tuple(sorted(route.methods or []))) for route in router_new.routes)
-    old_paths = sorted((route.path, tuple(sorted(route.methods or []))) for route in router_old.routes)
-    assert new_paths == old_paths
+    assert _iter_route_paths(router_new) == _iter_route_paths(router_old)
 
 
 @pytest.mark.unit

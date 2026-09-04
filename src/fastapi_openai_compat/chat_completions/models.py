@@ -196,7 +196,7 @@ class Choice(OpenAIBaseModel):
             "`tool_calls` (tool invocation), or `content_filter`."
         ),
     )
-    logprobs: None | dict = Field(
+    logprobs: dict | None = Field(
         default=None,
         description="Log probability information (not currently populated).",
     )

@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass, field
+from unittest.mock import patch
 
 import pytest
 from haystack.dataclasses import StreamingChunk
@@ -505,3 +506,68 @@ class TestReasoningStreaming:
 
         second = json.loads(chunks[1][len("data: ") :])
         assert second["choices"][0]["delta"]["content"] == "done"
+
+
+@pytest.mark.unit
+class TestCreatedTimestampSharedAcrossChunks:
+    @pytest.mark.asyncio
+    async def test_sync_stream_shares_created_across_chunk_types(self):
+        @dataclass
+        class FakeReasoning:
+            reasoning_text: str = ""
+
+        @dataclass
+        class ReasoningChunk:
+            content: str = ""
+            reasoning: object = None
+
+        def gen():
+            yield ReasoningChunk(reasoning=FakeReasoning(reasoning_text="thinking..."))
+            yield StreamingChunk(
+                content="",
+                tool_calls=[ToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments="{}")],
+                index=0,
+            )
+            yield StreamingChunk(content="answer", finish_reason="stop")
+
+        with patch(
+            "fastapi_openai_compat.chat_completions.streaming.time.time",
+            side_effect=[100, 200, 300, 400, 500],
+        ) as mocked_time:
+            response = create_sync_streaming_response(gen(), resp_id="r-created", model_name="m")
+            chunks = [chunk async for chunk in response.body_iterator]
+
+        assert mocked_time.call_count == 1
+        for chunk in chunks:
+            assert json.loads(chunk[len("data: ") :])["created"] == 100
+
+    @pytest.mark.asyncio
+    async def test_async_stream_shares_created_across_chunk_types(self):
+        @dataclass
+        class FakeReasoning:
+            reasoning_text: str = ""
+
+        @dataclass
+        class ReasoningChunk:
+            content: str = ""
+            reasoning: object = None
+
+        async def gen():
+            yield ReasoningChunk(reasoning=FakeReasoning(reasoning_text="thinking..."))
+            yield StreamingChunk(
+                content="",
+                tool_calls=[ToolCallDelta(index=0, id="call_1", tool_name="get_weather", arguments="{}")],
+                index=0,
+            )
+            yield StreamingChunk(content="answer", finish_reason="stop")
+
+        with patch(
+            "fastapi_openai_compat.chat_completions.streaming.time.time",
+            side_effect=[100, 200, 300, 400, 500],
+        ) as mocked_time:
+            response = create_async_streaming_response(gen(), resp_id="r-created-a", model_name="m")
+            chunks = [chunk async for chunk in response.body_iterator]
+
+        assert mocked_time.call_count == 1
+        for chunk in chunks:
+            assert json.loads(chunk[len("data: ") :])["created"] == 100
