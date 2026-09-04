@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass, field
+from unittest.mock import patch
 
 import pytest
 from haystack.dataclasses import StreamingChunk
@@ -529,10 +530,16 @@ class TestCreatedTimestampSharedAcrossChunks:
             )
             yield StreamingChunk(content="answer", finish_reason="stop")
 
-        response = create_sync_streaming_response(gen(), resp_id="r-created", model_name="m")
-        chunks = [chunk async for chunk in response.body_iterator]
-        created_values = {json.loads(chunk[len("data: ") :])["created"] for chunk in chunks}
-        assert len(created_values) == 1
+        with patch(
+            "fastapi_openai_compat.chat_completions.streaming.time.time",
+            side_effect=[100, 200, 300, 400, 500],
+        ) as mocked_time:
+            response = create_sync_streaming_response(gen(), resp_id="r-created", model_name="m")
+            chunks = [chunk async for chunk in response.body_iterator]
+
+        assert mocked_time.call_count == 1
+        for chunk in chunks:
+            assert json.loads(chunk[len("data: ") :])["created"] == 100
 
     @pytest.mark.asyncio
     async def test_async_stream_shares_created_across_chunk_types(self):
@@ -554,7 +561,13 @@ class TestCreatedTimestampSharedAcrossChunks:
             )
             yield StreamingChunk(content="answer", finish_reason="stop")
 
-        response = create_async_streaming_response(gen(), resp_id="r-created-a", model_name="m")
-        chunks = [chunk async for chunk in response.body_iterator]
-        created_values = {json.loads(chunk[len("data: ") :])["created"] for chunk in chunks}
-        assert len(created_values) == 1
+        with patch(
+            "fastapi_openai_compat.chat_completions.streaming.time.time",
+            side_effect=[100, 200, 300, 400, 500],
+        ) as mocked_time:
+            response = create_async_streaming_response(gen(), resp_id="r-created-a", model_name="m")
+            chunks = [chunk async for chunk in response.body_iterator]
+
+        assert mocked_time.call_count == 1
+        for chunk in chunks:
+            assert json.loads(chunk[len("data: ") :])["created"] == 100
