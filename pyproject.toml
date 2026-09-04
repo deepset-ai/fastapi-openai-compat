@@ -35,6 +35,9 @@ Issues = "https://github.com/deepset-ai/fastapi-openai-compat/issues"
 [tool.hatch.version]
 source = "vcs"
 
+[tool.hatch.build.targets.wheel]
+core-metadata-version = "2.3"
+
 [dependency-groups]
 dev = [
   "ruff",
