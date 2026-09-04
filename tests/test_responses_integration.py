@@ -366,7 +366,12 @@ def test_can_use_dedicated_models_router_without_shadowing():
     app.include_router(chat_router)
     app.include_router(responses_router)
 
-    model_routes = [route for route in app.routes if getattr(route, "path", None) == "/v1/models"]
+    model_routes: list = []
+    for route in app.routes:
+        if hasattr(route, "effective_route_contexts"):
+            model_routes.extend(ctx for ctx in route.effective_route_contexts() if ctx.path == "/v1/models")
+        elif getattr(route, "path", None) == "/v1/models":
+            model_routes.append(route)
     assert len(model_routes) == 1
 
     with TestClient(app) as client:
